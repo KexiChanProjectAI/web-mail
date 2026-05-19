@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/go-sql-driver/mysql"
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -129,7 +130,11 @@ func hasDir(entries []fs.DirEntry, name string) bool {
 }
 
 func Connect(dsn string) (*sql.DB, error) {
-	db, err := sql.Open("mysql", dsn)
+	normalizedDSN, err := normalizeMySQLDSN(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("normalize dsn: %w", err)
+	}
+	db, err := sql.Open("mysql", normalizedDSN)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
@@ -137,6 +142,18 @@ func Connect(dsn string) (*sql.DB, error) {
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
 	return db, nil
+}
+
+func normalizeMySQLDSN(dsn string) (string, error) {
+	if strings.TrimSpace(dsn) == "" {
+		return "", fmt.Errorf("dsn is required")
+	}
+	cfg, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		return "", err
+	}
+	cfg.ParseTime = true
+	return cfg.FormatDSN(), nil
 }
 
 func RunMigrations(db *sql.DB, migrations []Migration) error {
