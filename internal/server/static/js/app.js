@@ -74,7 +74,7 @@ async function fetchJSON(url) {
 }
 
 function redirectToLogin() {
-  window.location.href = '/login';
+    renderLogin();
 }
 
 function escapeRouteSegment(value) {

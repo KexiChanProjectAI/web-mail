@@ -99,6 +99,7 @@ func New(cfg *config.Config, db *sql.DB) *Server {
 		r.Get("/api/messages/{id}/attachments/{idx}", s.attachmentHandler.GetAttachment)
 	})
 	r.Get("/", spaHandler)
+	r.Get("/login", spaHandler)
 	r.Get("/messages/{id}", spaHandler)
 	r.Handle("/static/*", staticHandler)
 
