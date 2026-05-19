@@ -50,7 +50,7 @@ func SetupSuite(t *testing.T) *IntegrationTestSuite {
 		t.Fatalf("connect test database: %v", err)
 	}
 
-	migrations, err := maildb.LoadMigrations(projectPath("migrations"))
+	migrations, err := maildb.LoadMigrations(maildb.MigrationsFS)
 	if err != nil {
 		database.Close()
 		t.Fatalf("load migrations: %v", err)
@@ -93,7 +93,7 @@ func TeardownSuite(suite *IntegrationTestSuite) {
 		suite.server.Close()
 	}
 	if suite.db != nil {
-		migrations, err := maildb.LoadMigrations(projectPath("migrations"))
+		migrations, err := maildb.LoadMigrations(maildb.MigrationsFS)
 		if err == nil {
 			_ = maildb.RollbackMigration(suite.db, migrations)
 		}

@@ -19,7 +19,7 @@ func SetupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("connect to test database: %v", err)
 	}
 
-	migrations, err := db.LoadMigrations("./migrations")
+	migrations, err := db.LoadMigrations(db.MigrationsFS)
 	if err != nil {
 		database.Close()
 		t.Fatalf("load migrations: %v", err)
@@ -38,7 +38,7 @@ func TeardownTestDB(t *testing.T, database *sql.DB) {
 		return
 	}
 
-	migrations, err := db.LoadMigrations("./migrations")
+	migrations, err := db.LoadMigrations(db.MigrationsFS)
 	if err != nil {
 		t.Logf("WARNING: failed to load migrations for teardown: %v", err)
 		database.Close()

@@ -23,7 +23,7 @@ func TestLoadMigrations(t *testing.T) {
 		t.Fatalf("write down: %v", err)
 	}
 
-	migrations, err := LoadMigrations(tmp)
+	migrations, err := LoadMigrations(os.DirFS(tmp))
 	if err != nil {
 		t.Fatalf("LoadMigrations: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestMigrationString(t *testing.T) {
 
 func TestLoadMigrationsEmptyDir(t *testing.T) {
 	tmp := t.TempDir()
-	migrations, err := LoadMigrations(tmp)
+	migrations, err := LoadMigrations(os.DirFS(tmp))
 	if err != nil {
 		t.Fatalf("LoadMigrations on empty dir: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestLoadMigrationsIgnoresNonNumeric(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	migrations, err := LoadMigrations(tmp)
+	migrations, err := LoadMigrations(os.DirFS(tmp))
 	if err != nil {
 		t.Fatalf("LoadMigrations: %v", err)
 	}
@@ -91,15 +91,15 @@ func TestLoadMigrationsMissingDownSQL(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	_, err := LoadMigrations(tmp)
+	_, err := LoadMigrations(os.DirFS(tmp))
 	if err == nil {
 		t.Error("expected error for missing down migration")
 	}
 }
 
 func TestSQLSyntaxValid(t *testing.T) {
-	upPath := "../../migrations/001_create_mailbox_tables.up.sql"
-	downPath := "../../migrations/001_create_mailbox_tables.down.sql"
+	upPath := "migrations/001_create_mailbox_tables.up.sql"
+	downPath := "migrations/001_create_mailbox_tables.down.sql"
 
 	upBytes, err := os.ReadFile(upPath)
 	if err != nil {

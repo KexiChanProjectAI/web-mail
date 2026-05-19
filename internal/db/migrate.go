@@ -3,8 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
+	"io/fs"
 	"sort"
 	"strings"
 
@@ -22,10 +21,19 @@ func (m *Migration) String() string {
 	return fmt.Sprintf("%03d_%s", m.Version, m.Name)
 }
 
-func LoadMigrations(migrationsDir string) ([]Migration, error) {
-	entries, err := os.ReadDir(migrationsDir)
+func LoadMigrations(fsys fs.FS) ([]Migration, error) {
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return nil, fmt.Errorf("read migrations dir: %w", err)
+	}
+	if !hasUpMigration(entries) && hasDir(entries, "migrations") {
+		if subFS, err := fs.Sub(fsys, "migrations"); err == nil {
+			fsys = subFS
+			entries, err = fs.ReadDir(fsys, ".")
+			if err != nil {
+				return nil, fmt.Errorf("read migrations dir: %w", err)
+			}
+		}
 	}
 
 	seen := make(map[string]bool)
@@ -60,16 +68,16 @@ func LoadMigrations(migrationsDir string) ([]Migration, error) {
 	})
 
 	for i := range migrations {
-		upPath := filepath.Join(migrationsDir, fmt.Sprintf("%03d_%s.up.sql", migrations[i].Version, migrations[i].Name))
-		downPath := filepath.Join(migrationsDir, fmt.Sprintf("%03d_%s.down.sql", migrations[i].Version, migrations[i].Name))
+		upPath := fmt.Sprintf("%03d_%s.up.sql", migrations[i].Version, migrations[i].Name)
+		downPath := fmt.Sprintf("%03d_%s.down.sql", migrations[i].Version, migrations[i].Name)
 
-		upBytes, err := os.ReadFile(upPath)
+		upBytes, err := fs.ReadFile(fsys, upPath)
 		if err != nil {
 			return nil, fmt.Errorf("read up migration %s: %w", upPath, err)
 		}
 		migrations[i].UpSQL = string(upBytes)
 
-		downBytes, err := os.ReadFile(downPath)
+		downBytes, err := fs.ReadFile(fsys, downPath)
 		if err != nil {
 			return nil, fmt.Errorf("read down migration %s: %w", downPath, err)
 		}
@@ -77,6 +85,24 @@ func LoadMigrations(migrationsDir string) ([]Migration, error) {
 	}
 
 	return migrations, nil
+}
+
+func hasUpMigration(entries []fs.DirEntry) bool {
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".up.sql") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDir(entries []fs.DirEntry, name string) bool {
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func Connect(dsn string) (*sql.DB, error) {
@@ -191,14 +217,14 @@ func isMigrationApplied(db *sql.DB, version int) (bool, error) {
 	return count > 0, nil
 }
 
-func Migrate(databaseURL string, migrationsDir string) error {
+func Migrate(databaseURL string, fsys fs.FS) error {
 	db, err := Connect(databaseURL)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 
-	migrations, err := LoadMigrations(migrationsDir)
+	migrations, err := LoadMigrations(fsys)
 	if err != nil {
 		return fmt.Errorf("load migrations: %w", err)
 	}
@@ -206,14 +232,14 @@ func Migrate(databaseURL string, migrationsDir string) error {
 	return RunMigrations(db, migrations)
 }
 
-func Rollback(databaseURL string, migrationsDir string) error {
+func Rollback(databaseURL string, fsys fs.FS) error {
 	db, err := Connect(databaseURL)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 
-	migrations, err := LoadMigrations(migrationsDir)
+	migrations, err := LoadMigrations(fsys)
 	if err != nil {
 		return fmt.Errorf("load migrations: %w", err)
 	}

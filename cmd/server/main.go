@@ -32,7 +32,7 @@ func main() {
 	}
 	defer database.Close()
 
-	migrations, err := db.LoadMigrations("migrations")
+	migrations, err := db.LoadMigrations(db.MigrationsFS)
 	if err != nil {
 		logger.Error("failed to load migrations", "error", err)
 		os.Exit(1)
