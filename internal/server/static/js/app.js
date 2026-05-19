@@ -74,6 +74,9 @@ async function fetchJSON(url) {
 }
 
 function redirectToLogin() {
+    if (window.location.pathname !== '/login') {
+        history.pushState(null, '', '/login');
+    }
     renderLogin();
 }
 
@@ -96,6 +99,54 @@ function clearApp() {
   const app = ensureAppRoot();
   app.replaceChildren();
   return app;
+}
+
+function renderLogin() {
+    const app = document.getElementById('app');
+    app.innerHTML = `
+        <div class="container">
+            <div class="card" style="max-width:400px;margin:80px auto;">
+                <h2 style="margin-top:0;">Lite Mail</h2>
+                <p>Sign in to your mailbox</p>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="psk">Access Key</label>
+                        <input type="password" id="psk" name="psk" required autocomplete="current-password">
+                    </div>
+                    <div class="form-group">
+                        <label for="email">Email Address</label>
+                        <input type="email" id="email" name="email" required autocomplete="email">
+                    </div>
+                    <div id="login-error" style="color:var(--error-color,#c62828);margin-bottom:12px;display:none;"></div>
+                    <button type="submit" class="btn btn-primary" style="width:100%;">Sign In</button>
+                </form>
+            </div>
+        </div>
+    `;
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const psk = document.getElementById('psk').value;
+        const email = document.getElementById('email').value;
+        const errorEl = document.getElementById('login-error');
+        errorEl.style.display = 'none';
+        try {
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ psk, email })
+            });
+            if (res.ok) {
+                window.location.href = '/';
+                return;
+            }
+            const data = await res.json().catch(() => ({}));
+            errorEl.textContent = data.error || 'Invalid credentials';
+            errorEl.style.display = 'block';
+        } catch (err) {
+            errorEl.textContent = 'Connection error';
+            errorEl.style.display = 'block';
+        }
+    });
 }
 
 function renderShell(titleText, subtitleText) {
