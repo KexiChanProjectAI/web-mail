@@ -73,6 +73,14 @@ async function fetchJSON(url) {
   return response.json();
 }
 
+function isUnauthorizedError(error) {
+  if (!error || typeof error.message !== 'string') {
+    return false;
+  }
+
+  return /unauthorized|authentication required/i.test(error.message);
+}
+
 function redirectToLogin() {
     if (window.location.pathname !== '/login') {
         history.pushState(null, '', '/login');
@@ -311,7 +319,7 @@ async function renderRawSource(messageId) {
     }
     pre.textContent = await response.text();
   } catch (error) {
-    if (error.message !== 'Unauthorized') {
+    if (!isUnauthorizedError(error)) {
       pre.textContent = 'Unable to load raw source.';
     }
   }
@@ -594,14 +602,11 @@ async function loadMailboxPage(page = 1, query = '', options = {}) {
 
     syncMailboxState(payload, nextQuery);
     renderMessageList();
-} catch (error) {
-    if (error.message === 'Unauthorized') {
-      redirectToLogin();
+  } catch (error) {
+    if (requestToken !== state.mailboxRequestToken) {
       return;
     }
-    renderErrorState('Message not found', 'We could not load this message.');
-  }
-    if (error.message === 'Unauthorized') {
+    if (isUnauthorizedError(error)) {
       redirectToLogin();
       return;
     }
@@ -747,9 +752,11 @@ async function showMessageView(messageId) {
     }
     await renderMessageView(message);
   } catch (error) {
-    if (error.message !== 'Unauthorized') {
-      renderErrorState('Message unavailable', 'We could not load this message.');
+    if (isUnauthorizedError(error)) {
+      redirectToLogin();
+      return;
     }
+    renderErrorState('Message not found', 'We could not load this message.');
   }
 }
 
@@ -785,6 +792,7 @@ async function handleNavigation() {
 
 function boot() {
   ensureAppRoot();
+  window.addEventListener('lite-mail:unauthorized', redirectToLogin);
   window.addEventListener('hashchange', handleNavigation);
   void handleNavigation();
 }
