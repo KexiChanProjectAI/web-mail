@@ -594,8 +594,15 @@ async function loadMailboxPage(page = 1, query = '', options = {}) {
 
     syncMailboxState(payload, nextQuery);
     renderMessageList();
-  } catch (error) {
-    if (requestToken !== state.mailboxRequestToken || error.message === 'Unauthorized') {
+} catch (error) {
+    if (error.message === 'Unauthorized') {
+      redirectToLogin();
+      return;
+    }
+    renderErrorState('Message not found', 'We could not load this message.');
+  }
+    if (error.message === 'Unauthorized') {
+      redirectToLogin();
       return;
     }
     renderErrorState('Mailbox unavailable', 'We could not load the mailbox right now.');
