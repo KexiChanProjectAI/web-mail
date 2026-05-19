@@ -1,12 +1,41 @@
-import type { ForwardableEmailMessage } from '@cloudflare/workers-types';
+import type { ExecutionContext, ForwardableEmailMessage } from '@cloudflare/workers-types';
 
 export interface Env {
-  INGEST_URL: string;
-  WORKER_INGEST_PSK: string;
+  INGEST_URL?: string;
+  WORKER_INGEST_PSK?: string;
 }
 
-interface WorkerContext {
-  waitUntil(promise: Promise<unknown>): void;
+class RejectableDeliveryError extends Error {
+  reason: string;
+
+  constructor(message: string, reason: string) {
+    super(message);
+    this.name = 'RejectableDeliveryError';
+    this.reason = reason;
+  }
+}
+
+interface IngestMeta {
+  from: string;
+  to: string;
+  rawSize: number;
+  messageId: string | null;
+  subject: string | null;
+  ingestTarget?: string;
+}
+
+function buildIngestMeta(
+  message: Pick<ForwardableEmailMessage, 'from' | 'to' | 'rawSize' | 'headers'>,
+  ingestUrl?: string,
+): IngestMeta {
+  return {
+    from: message.from,
+    to: message.to,
+    rawSize: message.rawSize,
+    messageId: message.headers.get('message-id'),
+    subject: message.headers.get('subject'),
+    ingestTarget: ingestUrl,
+  };
 }
 
 async function collectStream(stream: ReadableStream): Promise<Uint8Array> {
@@ -33,26 +62,30 @@ async function collectStream(stream: ReadableStream): Promise<Uint8Array> {
 async function email(
   message: ForwardableEmailMessage,
   env: Env,
-  ctx: WorkerContext
+  ctx: ExecutionContext
 ): Promise<void> {
-  const from = message.from;
-  const to = message.to;
-  const rawSize = message.rawSize;
+  const ingestUrl = env.INGEST_URL;
+  const ingestPSK = env.WORKER_INGEST_PSK;
+  const meta = buildIngestMeta(message, ingestUrl);
+
+  console.log('Email event received:', meta);
 
   let rawMIME: Uint8Array;
   try {
     rawMIME = await collectStream(message.raw);
+    console.log('Email raw stream collected:', {
+      ...meta,
+      collectedBytes: rawMIME.byteLength,
+    });
   } catch (err) {
     console.error('Failed to read email raw stream:', err);
     message.setReject('Failed to read email content');
     return;
   }
 
-  const ingestUrl = env.INGEST_URL;
-  const ingestPSK = env.WORKER_INGEST_PSK;
-
   if (!ingestUrl || !ingestPSK) {
     console.error('Missing required environment configuration:', {
+      ...meta,
       hasIngestUrl: !!ingestUrl,
       hasIngestPSK: !!ingestPSK,
     });
@@ -60,21 +93,42 @@ async function email(
     return;
   }
 
-  ctx.waitUntil(
-    postToIngest(ingestUrl, ingestPSK, rawMIME.buffer, { from, to, rawSize })
-  );
+  console.log('Delivering email to ingest endpoint:', meta);
+
+  try {
+    await postToIngest(ingestUrl, ingestPSK, rawMIME.buffer, meta);
+  } catch (err) {
+    if (err instanceof RejectableDeliveryError) {
+      console.error('Rejecting email after delivery failure:', {
+        ...meta,
+        reason: err.reason,
+      });
+      message.setReject(err.reason);
+      return;
+    }
+
+    console.error('Email delivery failed before acknowledgement:', meta);
+    throw err;
+  }
 }
 
 async function postToIngest(
   url: string,
   psk: string,
   body: ArrayBuffer,
-  meta: { from: string; to: string; rawSize: number }
+  meta: IngestMeta
 ): Promise<void> {
   const controller = new AbortController();
+  // Hardcoded 30s timeout; there is no runtime config for this.
+  // 30s is the Cloudflare Worker fetch() subrequest limit.
   const timeout = setTimeout(() => controller.abort(), 30000);
 
   try {
+    console.log('Posting email to ingest endpoint:', {
+      ...meta,
+      bodyBytes: body.byteLength,
+    });
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -87,21 +141,24 @@ async function postToIngest(
 
     if (response.status === 401) {
       console.error('Ingest authentication failed:', {
-        from: meta.from,
-        to: meta.to,
+        ...meta,
         status: 401,
       });
-      return;
+      throw new RejectableDeliveryError(
+        'Ingest authentication failed',
+        'Mail delivery failed: ingest authentication rejected the message',
+      );
     }
 
     if (response.status === 413) {
       console.error('Message too large:', {
-        from: meta.from,
-        to: meta.to,
-        rawSize: meta.rawSize,
+        ...meta,
         status: 413,
       });
-      return;
+      throw new RejectableDeliveryError(
+        'Message too large',
+        'Mail delivery failed: message exceeds ingest size limits',
+      );
     }
 
     if (response.ok) {
@@ -112,26 +169,20 @@ async function postToIngest(
 
         if (data.status === 'accepted') {
           console.log('Email ingested successfully:', {
-            from: meta.from,
-            to: meta.to,
-            rawSize: meta.rawSize,
+            ...meta,
           });
           return;
         }
 
         if (data.status === 'duplicate') {
           console.log('Duplicate email ignored:', {
-            from: meta.from,
-            to: meta.to,
-            rawSize: meta.rawSize,
+            ...meta,
           });
           return;
         }
       } catch {
-        console.log('Email ingested successfully:', {
-          from: meta.from,
-          to: meta.to,
-          rawSize: meta.rawSize,
+        console.warn('Email ingested (unparseable response):', {
+          ...meta,
           note: 'Could not parse response',
         });
         return;
@@ -141,15 +192,14 @@ async function postToIngest(
     console.error('Ingest endpoint returned error:', {
       status: response.status,
       statusText: response.statusText,
-      from: meta.from,
-      to: meta.to,
-      rawSize: meta.rawSize,
+      ...meta,
     });
     throw new Error(`Ingest failed with status ${response.status}`);
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
-      console.error('Ingest request timed out:', { url, from: meta.from, to: meta.to });
+      console.error('Ingest request timed out:', { ...meta, url });
     } else {
+      console.error('Ingest request context:', meta);
       console.error('Ingest request failed:', err);
     }
     throw err;
@@ -159,6 +209,4 @@ async function postToIngest(
 }
 
 export { email };
-export default {
-  email,
-};
+export default { email: email };

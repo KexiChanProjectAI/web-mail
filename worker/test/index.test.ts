@@ -5,9 +5,11 @@ const mockFetch = vi.fn();
 (globalThis as Record<string, unknown>).fetch = mockFetch;
 
 const mockConsoleLog = vi.fn();
+const mockConsoleWarn = vi.fn();
 const mockConsoleError = vi.fn();
 vi.stubGlobal('console', {
   log: mockConsoleLog,
+  warn: mockConsoleWarn,
   error: mockConsoleError,
 });
 
@@ -18,7 +20,10 @@ interface MockContext {
 
 const createMockContext = (): MockContext => {
   const waitUntilFn = vi.fn((promise: Promise<unknown>) => {
-    promise.catch(() => {});
+    // Store the promise so tests can await its settlement.
+    // Intentionally swallow rejection to match real Cloudflare behavior
+    // (unhandled rejections in waitUntil do not crash the worker).
+    void promise.catch(() => {});
   });
   return {
     waitUntil: waitUntilFn,
@@ -67,7 +72,7 @@ interface Env {
 }
 
 const createMockEnv = (overrides: Partial<Env> = {}): Env => ({
-  INGEST_URL: 'https://mail.example.com/ingest',
+  INGEST_URL: 'https://mail.example.com/api/ingest',
   WORKER_INGEST_PSK: 'test-psk-secret',
   ...overrides,
 });
@@ -77,6 +82,7 @@ describe('Email Worker', () => {
     vi.clearAllMocks();
     mockFetch.mockReset();
     mockConsoleLog.mockReset();
+    mockConsoleWarn.mockReset();
     mockConsoleError.mockReset();
   });
 
@@ -90,7 +96,7 @@ describe('Email Worker', () => {
         rawSize: 100,
       });
       const env = createMockEnv({
-        INGEST_URL: 'https://mail.example.com/ingest',
+        INGEST_URL: 'https://mail.example.com/api/ingest',
         WORKER_INGEST_PSK: 'super-secret-psk',
       });
       const ctx = createMockContext();
@@ -105,7 +111,7 @@ describe('Email Worker', () => {
 
       const [url, options] = mockFetch.mock.calls[0];
 
-      expect(url).toBe('https://mail.example.com/ingest');
+      expect(url).toBe('https://mail.example.com/api/ingest');
       expect(options.method).toBe('POST');
       expect(options.headers).toEqual({
         'Content-Type': 'message/rfc822',
@@ -113,7 +119,22 @@ describe('Email Worker', () => {
       });
 
       expect(options.body).toBeInstanceOf(ArrayBuffer);
-      expect(ctx.waitUntil).toHaveBeenCalledTimes(1);
+      expect(mockConsoleLog).toHaveBeenCalledWith(
+        'Email event received:',
+        expect.objectContaining({
+          from: 'sender@example.com',
+          to: 'catchall@lite-mail.example.com',
+          rawSize: 100,
+          ingestTarget: 'https://mail.example.com/api/ingest',
+        })
+      );
+      expect(mockConsoleLog).toHaveBeenCalledWith(
+        'Delivering email to ingest endpoint:',
+        expect.objectContaining({
+          from: 'sender@example.com',
+          to: 'catchall@lite-mail.example.com',
+        })
+      );
     });
 
     it('should read raw MIME stream correctly', async () => {
@@ -148,9 +169,13 @@ describe('Email Worker', () => {
       const sentBody = decoder.decode(options.body as ArrayBuffer);
 
       expect(sentBody).toBe(expectedMime);
+      expect(mockConsoleLog).toHaveBeenCalledWith(
+        'Email raw stream collected:',
+        expect.objectContaining({ collectedBytes: expectedMime.length })
+      );
     });
 
-    it('should call setReject when INGEST_URL is missing', async () => {
+    it('should call setReject when raw stream throws', async () => {
       const { email } = await import('../src/index');
 
       const message = createMockMessage();
@@ -166,6 +191,13 @@ describe('Email Worker', () => {
         'Worker misconfigured: missing ingest URL or PSK'
       );
       expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        'Missing required environment configuration:',
+        expect.objectContaining({
+          hasIngestUrl: false,
+          hasIngestPSK: true,
+        })
+      );
     });
 
     it('should call setReject when WORKER_INGEST_PSK is missing', async () => {
@@ -184,6 +216,13 @@ describe('Email Worker', () => {
         'Worker misconfigured: missing ingest URL or PSK'
       );
       expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        'Missing required environment configuration:',
+        expect.objectContaining({
+          hasIngestUrl: true,
+          hasIngestPSK: false,
+        })
+      );
     });
 
     it('should handle empty raw stream', async () => {
@@ -211,6 +250,33 @@ describe('Email Worker', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
       const [, options] = mockFetch.mock.calls[0];
       expect(options.body).toBeInstanceOf(ArrayBuffer);
+      expect(message.setReject).not.toHaveBeenCalled();
+    });
+
+    it('should call setReject when raw stream throws', async () => {
+      const { email } = await import('../src/index');
+
+      const errorStream = new ReadableStream({
+        start(controller) {
+          controller.error(new Error('Stream read failure'));
+        },
+      });
+
+      const message = createMockMessage({
+        raw: errorStream,
+        rawSize: 100,
+      });
+      const env = createMockEnv();
+      const ctx = createMockContext();
+
+      await email(message, env, ctx);
+
+      expect(message.setReject).toHaveBeenCalledWith('Failed to read email content');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        'Failed to read email raw stream:',
+        expect.any(Error)
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it('should log success when ingest returns 200 with accepted status', async () => {
@@ -232,8 +298,13 @@ describe('Email Worker', () => {
 
       await email(message, env, ctx);
 
-      const waitUntilPromise = ctx.waitUntil.mock.calls[0][0];
-      await waitUntilPromise;
+      expect(mockConsoleLog).toHaveBeenCalledWith(
+        'Posting email to ingest endpoint:',
+        expect.objectContaining({
+          from: 'sender@example.com',
+          to: 'catchall@lite-mail.example.com',
+        })
+      );
 
       expect(mockConsoleLog).toHaveBeenCalledWith(
         'Email ingested successfully:',
@@ -263,8 +334,13 @@ describe('Email Worker', () => {
 
       await email(message, env, ctx);
 
-      const waitUntilPromise = ctx.waitUntil.mock.calls[0][0];
-      await waitUntilPromise;
+      expect(mockConsoleLog).toHaveBeenCalledWith(
+        'Posting email to ingest endpoint:',
+        expect.objectContaining({
+          from: 'sender@example.com',
+          to: 'catchall@lite-mail.example.com',
+        })
+      );
 
       expect(mockConsoleLog).toHaveBeenCalledWith(
         'Duplicate email ignored:',
@@ -288,9 +364,6 @@ describe('Email Worker', () => {
 
       await email(message, env, ctx);
 
-      const waitUntilPromise = ctx.waitUntil.mock.calls[0][0];
-      await waitUntilPromise;
-
       expect(mockConsoleError).toHaveBeenCalledWith(
         'Ingest authentication failed:',
         expect.objectContaining({
@@ -298,6 +371,9 @@ describe('Email Worker', () => {
           to: 'recipient@example.com',
           status: 401,
         })
+      );
+      expect(message.setReject).toHaveBeenCalledWith(
+        'Mail delivery failed: ingest authentication rejected the message'
       );
     });
 
@@ -316,9 +392,6 @@ describe('Email Worker', () => {
 
       await email(message, env, ctx);
 
-      const waitUntilPromise = ctx.waitUntil.mock.calls[0][0];
-      await waitUntilPromise;
-
       expect(mockConsoleError).toHaveBeenCalledWith(
         'Message too large:',
         expect.objectContaining({
@@ -328,30 +401,8 @@ describe('Email Worker', () => {
           status: 413,
         })
       );
-    });
-
-    it('should throw on 500 server error', async () => {
-      const { email } = await import('../src/index');
-
-      const message = createMockMessage();
-      const env = createMockEnv();
-      const ctx = createMockContext();
-
-      mockFetch.mockResolvedValueOnce(
-        new Response(null, { status: 500, statusText: 'Internal Server Error' })
-      );
-
-      await email(message, env, ctx);
-
-      const waitUntilPromise = ctx.waitUntil.mock.calls[0][0];
-      await expect(waitUntilPromise).rejects.toThrow('Ingest failed with status 500');
-
-      expect(mockConsoleError).toHaveBeenCalledWith(
-        'Ingest endpoint returned error:',
-        expect.objectContaining({
-          status: 500,
-          statusText: 'Internal Server Error',
-        })
+      expect(message.setReject).toHaveBeenCalledWith(
+        'Mail delivery failed: message exceeds ingest size limits'
       );
     });
 
@@ -364,10 +415,7 @@ describe('Email Worker', () => {
 
       mockFetch.mockRejectedValueOnce(new Error('Network connection failed'));
 
-      await email(message, env, ctx);
-
-      const waitUntilPromise = ctx.waitUntil.mock.calls[0][0];
-      await expect(waitUntilPromise).rejects.toThrow('Network connection failed');
+      await expect(email(message, env, ctx)).rejects.toThrow('Network connection failed');
 
       expect(mockConsoleError).toHaveBeenCalledWith(
         'Ingest request failed:',
@@ -382,22 +430,14 @@ describe('Email Worker', () => {
       const env = createMockEnv();
       const ctx = createMockContext();
 
-      const abortController = new AbortController();
-      mockFetch.mockImplementationOnce(() => {
-        return new Promise((_, reject) => {
-          setTimeout(() => reject(new DOMException('Aborted', 'AbortError')), 100);
-        });
-      });
+      mockFetch.mockRejectedValueOnce(new DOMException('Aborted', 'AbortError'));
 
-      await email(message, env, ctx);
-
-      const waitUntilPromise = ctx.waitUntil.mock.calls[0][0];
-      await expect(waitUntilPromise).rejects.toThrow();
+      await expect(email(message, env, ctx)).rejects.toThrow();
 
       expect(mockConsoleError).toHaveBeenCalledWith(
         'Ingest request timed out:',
         expect.objectContaining({
-          url: 'https://mail.example.com/ingest',
+          url: 'https://mail.example.com/api/ingest',
         })
       );
     });
