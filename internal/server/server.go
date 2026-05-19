@@ -3,9 +3,9 @@ package server
 import (
 	"context"
 	"database/sql"
+	"io/fs"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
 
@@ -70,7 +70,11 @@ func New(cfg *config.Config, db *sql.DB) *Server {
 	r.Use(middleware.RequestLogging(slog.Default()))
 	r.Use(middleware.CORS(cfg.PublicBaseURL))
 
-	staticHandler := http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(".", "static"))))
+	subFS, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		panic(err)
+	}
+	staticHandler := http.StripPrefix("/static/", http.FileServer(http.FS(subFS)))
 
 	r.Get("/healthz", s.healthHandler)
 

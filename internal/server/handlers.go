@@ -1,9 +1,6 @@
 package server
 
-import (
-	"net/http"
-	"path/filepath"
-)
+import "net/http"
 
 func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -12,5 +9,11 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func spaHandler(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, filepath.Join("static", "index.html"))
+	data, err := staticFS.ReadFile("static/index.html")
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(data)
 }
