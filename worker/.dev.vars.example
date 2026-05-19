@@ -1,0 +1,8 @@
+# Worker secrets for local development.
+# Copy this file to .dev.vars and fill in your values.
+# .dev.vars is NOT committed to git (.gitignore should exclude it).
+#
+# For production, use: wrangler secret put <name>
+
+INGEST_URL=http://localhost:8080/api/ingest
+WORKER_INGEST_PSK=change_me_worker_ingest_psk

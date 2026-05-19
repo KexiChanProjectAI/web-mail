@@ -10,8 +10,8 @@ The Cloudflare Email Worker handles inbound email reception via Cloudflare Email
 
 - **Do NOT use `message.forward()` or `message.reply()`** - These are not in scope for this implementation
 - **`message.raw` is a ReadableStream** - Must be consumed properly using a reader loop
-- **Worker message size limit**: 25 MB (Cloudflare Email Routing limit)
-- **Worker runtime limits**: 30s CPU, 128MB memory (configurable)
+- **Worker message size limit**: 30 MB (Cloudflare Email Routing limit)
+- **Worker runtime limits**: up to 30s CPU (paid Standard plan; Free tier is 10ms), 128MB memory (configurable)
 
 ## Cloudflare Email Worker API
 
@@ -49,7 +49,7 @@ interface ForwardableEmailMessage {
 
 | Variable | Description |
 |----------|-------------|
-| `INGEST_URL` | Full URL to the Go service ingest endpoint (e.g., `https://mail.example.com/ingest`) |
+| `INGEST_URL` | Full URL to the Go service ingest endpoint (e.g., `https://mail.example.com/api/ingest`) |
 | `WORKER_INGEST_PSK` | Pre-shared key for authentication with the ingest endpoint |
 
 Set secrets via:
@@ -70,6 +70,19 @@ npx wrangler secret put WORKER_INGEST_PSK
 ```bash
 npm install
 ```
+
+### Local Secrets (.dev.vars)
+
+For local development, create a `.dev.vars` file from the example template:
+
+```bash
+cp .dev.vars.example .dev.vars
+# Edit .dev.vars with your local values
+```
+
+`.dev.vars` is the Cloudflare Workers equivalent of a `.env` file and is automatically loaded by `wrangler dev`. Never commit `.dev.vars` to git.
+
+For production, always use `wrangler secret put`.
 
 ### Run Tests
 
@@ -127,12 +140,9 @@ main = "src/index.ts"
 
 [limits]
 cpu_ms = 100  # Sufficient for reading stream and POSTing to ingest
-
-[[unsafe.bindings]]
-name = "INGEST_URL"
-type = "plain_text"
-value = "https://mail.example.com/ingest"
 ```
+
+Note: `INGEST_URL` and `WORKER_INGEST_PSK` must **only** be set via `wrangler secret put`, never in `wrangler.toml`. See [Set Secrets](#set-secrets) above.
 
 ## Architecture Details
 
@@ -145,15 +155,15 @@ value = "https://mail.example.com/ingest"
    - `Content-Type: message/rfc822`
    - `X-Lite-Mail-Ingest-PSK: <psk>`
    - Raw MIME as body
-5. The Worker uses `ctx.waitUntil()` to ensure the POST completes even after the handler returns
+5. The Worker waits for the ingest POST to complete before acknowledging the email event
 
 ### Error Handling
 
 - **Missing env vars**: Calls `message.setReject()` to reject the email
 - **Stream read failure**: Logs error and rejects
-- **401 from ingest**: Logs authentication failure
-- **413 from ingest**: Logs message size error
-- **Other non-OK status**: Logs error
+- **401 from ingest**: Logs authentication failure and rejects the email
+- **413 from ingest**: Logs message size error and rejects the email
+- **Other non-OK status**: Logs error and throws so the invocation fails visibly
 - **Fetch timeout**: 30 second timeout on the POST request
 
 ### ReadableStream Collection

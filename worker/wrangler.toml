@@ -6,58 +6,25 @@
 
 name = "web-mail"
 main = "src/index.ts"
-compatibility_date = "2024-01-01"
+compatibility_date = "2025-06-01"
 
-# Account ID - found in Cloudflare Dashboard > Workers & Pages > Overview
-# REPLACE with your Cloudflare account ID
+# Account ID - optional for email Workers; only required for certain wrangler
+# commands (e.g., deploying with zone-specific features). Remove/comment if not needed.
+# Found in: Cloudflare Dashboard > Workers & Pages > Overview > Account ID
 # account_id = "your-account-id-here"
 
-# Route configuration - customize for your domain
-# https://developers.cloudflare.com/workers/routing/routes/
-#
-# To receive emails, you need to set up Email Routing in Cloudflare Dashboard:
-# 1. Add your domain to Cloudflare Email Routing
-# 2. Create a custom address (e.g., *@yourdomain.com for catch-all)
-# 3. Set the destination to this Worker
-#
-# The route below is for HTTP testing. For Email Routing, the route is
-# managed via the Cloudflare Email Routing settings, not wrangler routes.
-
+# Route configuration — NOT used by Cloudflare Email Routing.
+# Email Routing routes are managed via Cloudflare Dashboard > Email > Email Routing.
+# The block below is only for optional HTTP endpoints (e.g., a health-check route).
 # [[routes]]
 # pattern = "mail.yourdomain.com"
 # zone_name = "yourdomain.com"
 
-# INGEST_URL and WORKER_INGEST_PSK are set via Cloudflare Dashboard or wrangler secret/variable CLI
-# Do NOT put real values here - this file is committed to git
+# Secrets MUST be set via Cloudflare Dashboard or wrangler CLI, NOT in this file.
+# Required secrets:
+#   wrangler secret put INGEST_URL
+#   wrangler secret put WORKER_INGEST_PSK
 
 # CPU time limit - NOT supported on Free plan; remove or upgrade to paid plan
 # [limits]
 # cpu_ms = 100
-
-# Workers KV namespaces (if needed for caching or rate limiting)
-# [[kv_namespaces]]
-# binding = "CACHE"
-# id = "your-kv-namespace-id"
-
-# Durable Objects (if needed for coordination)
-# [[durable_objects.bindings]]
-# name = "COORDINATOR"
-# class_name = "Coordinator"
-
-# Note: The following secrets MUST be set via wrangler CLI, NOT in this file:
-#
-#   wrangler secret put WORKER_INGEST_PSK
-#
-# This is the pre-shared key used to authenticate this Worker with the Go ingest
-# endpoint. Choose a strong random value and configure the same value in your
-# Go service as WORKER_INGEST_PSK.
-#
-# Example:
-#   wrangler secret put WORKER_INGEST_PSK
-#   # Enter a secure random string when prompted
-#
-# To deploy:
-#   1. Copy this file to wrangler.toml
-#   2. Fill in your account_id and domain values
-#   3. Set required secrets via: wrangler secret put <secret-name>
-#   4. Run: wrangler deploy

@@ -23,7 +23,7 @@ export async function email(
 ```typescript
 interface ForwardableEmailMessage {
   readonly from: string;       // Envelope MAIL FROM (sender)
-  readonly to: string;          // Envelope RCPT TO (recipient)
+  readonly to: string;         // Envelope RCPT TO (recipient)
   readonly headers: Headers;    // Email headers (Subject, Message-ID, etc.)
   readonly raw: ReadableStream; // Raw MIME email content stream
   readonly rawSize: number;     // Size of raw email in bytes
@@ -92,12 +92,15 @@ The Worker implements a 30-second timeout for the ingest POST request to prevent
 
 | Variable | Type | Description |
 |----------|------|-------------|
-| `INGEST_URL` | `string` | Go service ingest endpoint URL (e.g., `https://mail.example.com/ingest`) |
+| `INGEST_URL` | `string` | Go service ingest endpoint URL (e.g., `https://mail.example.com/api/ingest`) |
 | `WORKER_INGEST_PSK` | `string` | Pre-shared key for worker-to-service authentication |
 
 ### Setting Secrets
 
 ```bash
+# Set the ingest endpoint URL
+wrangler secret put INGEST_URL
+
 # Set the PSK secret (will be prompted for value)
 wrangler secret put WORKER_INGEST_PSK
 
@@ -116,15 +119,15 @@ wrangler secret list
 - **Headers**:
   - `Content-Type: message/rfc822` - Raw MIME format
   - `X-Lite-Mail-Ingest-PSK: <WORKER_INGEST_PSK>` - Authentication
-  - `X-Lite-Mail-From: <sender@email>` - Original sender
-  - `X-Lite-Mail-To: <recipient@email>` - Original recipient
+  - *(`X-Lite-Mail-From` and `X-Lite-Mail-To` are reserved for future use; not currently sent)*
 - **Body**: Raw MIME email as `ArrayBuffer`
 
 ### Response
 
 The Go service should return:
 - `200 OK` on success
-- `4xx` or `5xx` on failure (Worker will log error)
+- `401` or `413` on permanent delivery failure (Worker logs and rejects the email)
+- `5xx` or network failure on transient origin issues (Worker logs and the invocation fails)
 
 ## Email Routing Setup
 
@@ -167,6 +170,7 @@ cd worker
 npm install
 
 # Set required secrets
+wrangler secret put INGEST_URL
 wrangler secret put WORKER_INGEST_PSK
 
 # Deploy
@@ -175,14 +179,16 @@ npm run deploy
 
 ### Testing Locally
 
+`wrangler dev` serves on `http://localhost:8787` but the email worker endpoint path
+differs from the Cloudflare production path. For local email worker testing, use
+Cloudflare's `wrangler dev` URL format directly:
+
 ```bash
-# Start local development server (wrangler dev)
 npm run dev
 
-# Send a test email using the local endpoint
-curl --request POST 'http://localhost:8787/cdn-cgi/handler/email' \
-  --url-query 'from=sender@example.com' \
-  --url-query 'to=recipient@example.com' \
+# Worker is accessible at the root; the email path is /email
+curl --request POST 'http://localhost:8787/email' \
+  --header 'Content-Type: message/rfc822' \
   --data-raw 'From: sender@example.com
 To: recipient@example.com
 Subject: Test Email
@@ -190,6 +196,9 @@ Message-ID: <test-id@example.com>
 
 Test body content'
 ```
+
+**Note**: The `/cdn-cgi/handler/email` path shown in some Cloudflare docs is for the
+Cloudflare-hosted endpoint, not for `wrangler dev`. Adjust accordingly.
 
 **Reference**: https://developers.cloudflare.com/email-routing/email-workers/runtime-api/
 

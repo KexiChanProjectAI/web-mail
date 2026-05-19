@@ -93,6 +93,7 @@ SESSION_TTL_HOURS=24
 NORMAL_USER_PSK=your_normal_user_psk
 ADMIN_PSK=your_admin_psk
 WORKER_INGEST_PSK=your_worker_ingest_psk
+INGEST_URL=https://mail.example.com/api/ingest
 APP_ENV=production
 ```
 
@@ -175,6 +176,7 @@ curl https://mail.example.com/healthz
 | `NORMAL_USER_PSK` | Pre-shared key for normal users | Yes | (none) | `norm_abc123...` |
 | `ADMIN_PSK` | Pre-shared key for admin access | Yes | (none) | `admin_xyz789...` |
 | `WORKER_INGEST_PSK` | Pre-shared key for Cloudflare Worker | Yes | (none) | `work_ingest_...` |
+| `INGEST_URL` | Worker secret: full URL to Go service ingest endpoint | Yes (Worker) | (none) | `https://mail.example.com/api/ingest` |
 | `SERVER_ADDR` | Listen address for the server | No | `:8080` | `:8080` |
 | `APP_ENV` | Application environment | No | `production` | `production` |
 

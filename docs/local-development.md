@@ -89,6 +89,7 @@ Navigate to **http://localhost:8080** to access the lite-mail interface.
 | `NORMAL_USER_PSK` | Yes | - | Pre-shared key for normal user authentication |
 | `ADMIN_PSK` | Yes | - | Pre-shared key for admin access |
 | `WORKER_INGEST_PSK` | Yes | - | Pre-shared key for Worker ingest endpoint |
+| `INGEST_URL` | Yes | - | Full URL to Go service ingest endpoint (e.g., `http://localhost:8080/api/ingest`) |
 
 ## Database Setup
 
