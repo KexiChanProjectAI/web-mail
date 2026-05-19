@@ -87,6 +87,29 @@ func LoadMigrations(fsys fs.FS) ([]Migration, error) {
 	return migrations, nil
 }
 
+// splitSQL splits a multi-statement SQL string into individual statements.
+// It strips SQL comments and whitespace-only fragments, returning only
+// meaningful statements suitable for drivers that don't support multi-statement exec.
+func splitSQL(sql string) []string {
+	var stmts []string
+	for _, s := range strings.Split(sql, ";") {
+		var lines []string
+		for _, line := range strings.Split(s, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "--") || line == "" {
+				continue
+			}
+			lines = append(lines, line)
+		}
+		stmt := strings.Join(lines, "\n")
+		stmt = strings.TrimSpace(stmt)
+		if stmt != "" {
+			stmts = append(stmts, stmt)
+		}
+	}
+	return stmts
+}
+
 func hasUpMigration(entries []fs.DirEntry) bool {
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".up.sql") {
@@ -135,9 +158,11 @@ func RunMigrations(db *sql.DB, migrations []Migration) error {
 			return fmt.Errorf("begin tx for migration %d: %w", m.Version, err)
 		}
 
-		if _, err := tx.Exec(m.UpSQL); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("apply migration %d: %w", m.Version, err)
+		for _, stmt := range splitSQL(m.UpSQL) {
+			if _, err := tx.Exec(stmt); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("apply migration %d: %w", m.Version, err)
+			}
 		}
 
 		if _, err := tx.Exec("INSERT INTO schema_migrations (version, name) VALUES (?, ?)", m.Version, m.Name); err != nil {
@@ -178,9 +203,11 @@ func RollbackMigration(db *sql.DB, migrations []Migration) error {
 			return fmt.Errorf("begin tx for rollback %d: %w", m.Version, err)
 		}
 
-		if _, err := tx.Exec(m.DownSQL); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("rollback migration %d: %w", m.Version, err)
+		for _, stmt := range splitSQL(m.DownSQL) {
+			if _, err := tx.Exec(stmt); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("rollback migration %d: %w", m.Version, err)
+			}
 		}
 
 		if _, err := tx.Exec("DELETE FROM schema_migrations WHERE version = ?", m.Version); err != nil {
