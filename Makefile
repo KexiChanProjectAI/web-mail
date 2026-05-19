@@ -1,9 +1,9 @@
-.PHONY: all build run test test-integration test-worker vet clean db-setup migrate help
+.PHONY: all build run test test-integration test-worker vet clean db-setup help
 
 # Default target
 all: vet build test
 
-# Build the server binary
+# Build the server binary (migrations and frontend are embedded via go:embed)
 build:
 	go build -o bin/lite-mail ./cmd/server
 
@@ -50,15 +50,12 @@ db-setup:
 	@echo ""
 	@echo "Migrations run automatically on first server start."
 
-# Run migrations
-migrate:
-	@echo "Migrations run automatically on server start."
-	@echo "To run migrations manually (if supported):"
-	@echo "  go run ./cmd/server -migrate-only"
-
 # Show help
 help:
 	@echo "=== lite-mail Makefile ==="
+	@echo ""
+	@echo "The binary is self-contained: migrations and frontend are embedded via go:embed."
+	@echo "No external files needed at runtime (only DATA_DIR for user data)."
 	@echo ""
 	@echo "Targets:"
 	@echo "  all              Run vet, build, and test (default)"
@@ -70,5 +67,4 @@ help:
 	@echo "  vet              Run go vet for static analysis"
 	@echo "  clean            Remove build artifacts"
 	@echo "  db-setup         Show database setup instructions"
-	@echo "  migrate          Migration instructions"
 	@echo "  help             Show this help message"
