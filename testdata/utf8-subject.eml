@@ -1,0 +1,8 @@
+From: sender@example.com
+To: recipient@example.com
+Subject: =?UTF-8?B?UsOpc3Vtw6ogRGlzY3Vzc2lvbg==?=
+Date: Mon, 19 May 2026 10:00:00 +0000
+Content-Type: text/plain; charset="utf-8"
+
+This email has a UTF-8 encoded subject line.
+The subject contains international characters: Résumé Discussion

@@ -1,0 +1,12 @@
+.env
+*.db
+data/
+attachments/
+raw/
+*.log
+bin/
+tmp/
+node_modules/
+.wrangler/
+dist/
+.sisyphus/

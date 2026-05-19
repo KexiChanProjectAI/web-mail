@@ -1,0 +1,14 @@
+From sender@example.com
+To: recipient@example.com
+Subject: Malformed MIME message
+Date: Mon, 19 May 2026 12:00:00 +0000
+Content-Type: multipart/mixed boundary=broken
+
+This is not valid MIME.
+No proper boundaries defined.
+Missing blank line between headers and body.
+--broken
+Content-Type: text/plain
+
+Truncated content that doesn't follow proper MIME structure
+--broken--

@@ -1,0 +1,25 @@
+From: sender@example.com
+To: recipient@example.com
+Subject: Large Attachment Email
+Date: Mon, 19 May 2026 10:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="----=_Part_789"
+
+------=_Part_789
+Content-Type: text/plain; charset="utf-8"
+
+This email is a placeholder for testing large attachments near the 25 MiB limit.
+The actual binary attachment should be generated programmatically in tests
+to avoid storing large files in the repository.
+
+The attachment content below is a placeholder marker, not actual binary data.
+
+------=_Part_789
+Content-Type: application/octet-stream; name="large-file.bin"
+Content-Disposition: attachment; filename="large-file.bin"
+Content-Transfer-Encoding: base64
+
+THIS_IS_A_PLACEHOLDER_FOR_A_LARGE_BINARY_ATTACHMENT
+REPLACE_WITH_PROGRAMMATICALLY_GENERATED_DATA_IN_TESTS
+
+------=_Part_789--

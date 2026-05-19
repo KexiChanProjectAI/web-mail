@@ -1,0 +1,19 @@
+From: sender@example.com
+To: recipient@example.com
+Subject: Email with suspicious attachment filename
+Date: Mon, 19 May 2026 11:00:00 +0000
+Content-Type: multipart/mixed; boundary="----=_Part_123"
+
+------=_Part_123
+Content-Type: text/plain; charset="utf-8"
+
+Please see the attached file.
+
+------=_Part_123
+Content-Type: application/octet-stream; name="../../../etc/passwd"
+Content-Disposition: attachment; filename="../../../etc/passwd"
+
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+
+------=_Part_123--

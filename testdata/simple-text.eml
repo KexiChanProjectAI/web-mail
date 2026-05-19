@@ -1,0 +1,9 @@
+From: sender@example.com
+To: recipient@example.com
+Subject: Simple text email
+Date: Mon, 19 May 2026 10:00:00 +0000
+Content-Type: text/plain; charset="utf-8"
+
+This is a simple plain text email body.
+It contains multiple lines of text.
+Used for testing basic email parsing and storage.

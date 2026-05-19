@@ -1,0 +1,19 @@
+{
+  "name": "lite-mail-worker",
+  "version": "0.1.0",
+  "description": "Cloudflare Email Worker for lite-mail ingest",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "build": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --local"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241106.0",
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.8",
+    "wrangler": "^4.1.0"
+  },
+  "private": true
+}

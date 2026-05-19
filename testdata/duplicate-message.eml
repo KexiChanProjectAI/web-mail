@@ -1,0 +1,9 @@
+From: sender@example.com
+To: recipient@example.com
+Subject: Duplicate detection test
+Date: Mon, 19 May 2026 13:00:00 +0000
+Message-ID: <duplicate-test-12345@example.com>
+Content-Type: text/plain; charset="utf-8"
+
+This email is used to test duplicate message detection.
+It has a unique Message-ID for testing purposes.

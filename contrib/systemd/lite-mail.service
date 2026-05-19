@@ -1,0 +1,27 @@
+[Unit]
+Description=lite-mail email service
+After=network.target mariadb.service
+
+[Service]
+Type=simple
+User=lite-mail
+Group=lite-mail
+WorkingDirectory=/opt/lite-mail
+ExecStart=/usr/local/bin/lite-mail
+EnvironmentFile=/opt/lite-mail/.env
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/lite-mail /var/log/lite-mail
+
+# Allow reading of environment file
+ReadOnlyPaths=/opt/lite-mail/.env
+
+[Install]
+WantedBy=multi-user.target

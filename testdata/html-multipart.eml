@@ -1,0 +1,26 @@
+From: sender@example.com
+To: recipient@example.com
+Subject: HTML and Text Multipart Email
+Date: Mon, 19 May 2026 10:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="----=_Part_123"
+
+------=_Part_123
+Content-Type: text/plain; charset="utf-8"
+
+This is the plain text version of the email.
+It provides a fallback for email clients that do not support HTML.
+
+------=_Part_123
+Content-Type: text/html; charset="utf-8"
+
+<!DOCTYPE html>
+<html>
+<head><title>Test Email</title></head>
+<body>
+<p>This is the <strong>HTML</strong> version of the email.</p>
+<p>It includes <em>formatted</em> content for modern email clients.</p>
+</body>
+</html>
+
+------=_Part_123--
