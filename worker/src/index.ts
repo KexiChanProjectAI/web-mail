@@ -30,7 +30,7 @@ async function collectStream(stream: ReadableStream): Promise<Uint8Array> {
   return result;
 }
 
-export async function email(
+async function email(
   message: ForwardableEmailMessage,
   env: Env,
   ctx: WorkerContext
@@ -157,3 +157,8 @@ async function postToIngest(
     clearTimeout(timeout);
   }
 }
+
+export { email };
+export default {
+  email,
+};
