@@ -100,6 +100,28 @@ func TestListMessagesSearchQuery(t *testing.T) {
 	}
 }
 
+func TestListMessagesIgnoresOperatorOnlySearchQuery(t *testing.T) {
+	f := newAPIFixture(t)
+	insertMessage(t, f, "alice@example.test", "One", "body one", []string{"user@example.test"})
+	insertMessage(t, f, "bob@example.test", "Two", "body two", []string{"user@example.test"})
+
+	rr := serveMessageRequest(f.mh.ListMessages, "/api/messages?q=%2B", &auth.Session{Email: "user@example.test"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Messages []messageDTO `json:"messages"`
+		Total    int          `json:"total"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Total != 2 || len(got.Messages) != 2 {
+		t.Fatalf("unexpected operator-only search result: %+v", got)
+	}
+}
+
 func TestGetMessageAuthorization(t *testing.T) {
 	f := newAPIFixture(t)
 	id := insertMessage(t, f, "alice@example.test", "Private", "body", []string{"owner@example.test"})

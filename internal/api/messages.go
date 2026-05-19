@@ -229,7 +229,7 @@ func listWhere(session *auth.Session, q string) (string, []any) {
 		clauses = append(clauses, "EXISTS (SELECT 1 FROM message_recipients mr WHERE mr.message_id = m.id AND mr.recipient_email = ?)")
 		args = append(args, session.Email)
 	}
-	if q != "" {
+	if isSearchQueryUsable(q) {
 		clauses = append(clauses, "MATCH(m.sender, m.subject, m.text_body) AGAINST (? IN BOOLEAN MODE)")
 		args = append(args, q)
 	}
@@ -237,6 +237,19 @@ func listWhere(session *auth.Session, q string) (string, []any) {
 		return "", args
 	}
 	return "WHERE " + strings.Join(clauses, " AND "), args
+}
+
+func isSearchQueryUsable(q string) bool {
+	trimmed := strings.TrimSpace(q)
+	if trimmed == "" {
+		return false
+	}
+	for _, r := range trimmed {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return true
+		}
+	}
+	return false
 }
 
 func numericURLParam(w http.ResponseWriter, r *http.Request, name string) (int64, bool) {
