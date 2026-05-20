@@ -110,51 +110,66 @@ function clearApp() {
 }
 
 function renderLogin() {
-    const app = document.getElementById('app');
-    app.innerHTML = `
-        <div class="container">
-            <div class="card" style="max-width:400px;margin:80px auto;">
-                <h2 style="margin-top:0;">Lite Mail</h2>
-                <p>Sign in to your mailbox</p>
-                <form id="login-form">
-                    <div class="form-group">
-                        <label for="psk">Access Key</label>
-                        <input type="password" id="psk" name="psk" required autocomplete="current-password">
-                    </div>
-                    <div class="form-group">
-                        <label for="email">Email Address</label>
-                        <input type="email" id="email" name="email" required autocomplete="email">
-                    </div>
-                    <div id="login-error" style="color:var(--error-color,#c62828);margin-bottom:12px;display:none;"></div>
-                    <button type="submit" class="btn btn-primary" style="width:100%;">Sign In</button>
-                </form>
-            </div>
+  const app = clearApp();
+  app.innerHTML = `
+    <section class="login-shell">
+      <div class="login-layout">
+        <div class="login-hero">
+          <p class="mail-eyebrow">Lite Mail</p>
+          <h1 class="login-title">Private inbox access with a calmer reading surface.</h1>
+          <p class="login-copy">Use your mailbox email address and access key to continue. Existing auth, routes, and state flow remain unchanged.</p>
+          <div class="login-hero-meta" aria-hidden="true">
+            <span class="message-chip login-hero-chip">Focused reading</span>
+            <span class="message-chip login-hero-chip">Safe attachment review</span>
+            <span class="message-chip login-hero-chip">Unchanged routing</span>
+          </div>
         </div>
-    `;
-    document.getElementById('login-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const psk = document.getElementById('psk').value;
-        const email = document.getElementById('email').value;
-        const errorEl = document.getElementById('login-error');
-        errorEl.style.display = 'none';
-        try {
-            const res = await fetch('/api/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ psk, email })
-            });
-            if (res.ok) {
-                window.location.href = '/';
-                return;
-            }
-            const data = await res.json().catch(() => ({}));
-            errorEl.textContent = data.error || 'Invalid credentials';
-            errorEl.style.display = 'block';
-        } catch (err) {
-            errorEl.textContent = 'Connection error';
-            errorEl.style.display = 'block';
-        }
-    });
+        <section class="panel login-panel" aria-labelledby="login-heading">
+          <div class="login-panel-head">
+            <p class="login-kicker">Sign in</p>
+            <h2 id="login-heading" class="panel-title login-panel-title">Open your mailbox</h2>
+            <p class="muted-copy">Authenticate to read captured mail, inspect attachments, and review raw source safely.</p>
+          </div>
+          <form id="login-form" class="login-form">
+            <label class="form-field" for="psk">
+              <span class="form-field-label">Access key</span>
+              <input class="form-input" type="password" id="psk" name="psk" required autocomplete="current-password">
+            </label>
+            <label class="form-field" for="email">
+              <span class="form-field-label">Email address</span>
+              <input class="form-input" type="email" id="email" name="email" required autocomplete="email">
+            </label>
+            <div id="login-error" class="form-error" hidden role="alert"></div>
+            <button type="submit" class="primary-button form-submit">Sign in</button>
+          </form>
+        </section>
+      </div>
+    </section>
+  `;
+  document.getElementById('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const psk = document.getElementById('psk').value;
+    const email = document.getElementById('email').value;
+    const errorEl = document.getElementById('login-error');
+    errorEl.hidden = true;
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ psk, email }),
+      });
+      if (res.ok) {
+        window.location.href = '/';
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      errorEl.textContent = data.error || 'Invalid credentials';
+      errorEl.hidden = false;
+    } catch (err) {
+      errorEl.textContent = 'Connection error';
+      errorEl.hidden = false;
+    }
+  });
 }
 
 function renderShell(titleText, subtitleText) {
@@ -167,7 +182,7 @@ function renderShell(titleText, subtitleText) {
 
   const eyebrow = document.createElement('p');
   eyebrow.className = 'mail-eyebrow';
-  eyebrow.textContent = 'Lite Mail';
+  eyebrow.textContent = 'Lite Mail workspace';
 
   const title = document.createElement('h1');
   title.className = 'mail-title';
@@ -338,6 +353,16 @@ function renderAttachments(attachments = [], messageId) {
   title.className = 'panel-title';
   title.textContent = `Attachments (${attachments.length})`;
 
+  const titleMeta = document.createElement('p');
+  titleMeta.className = 'section-meta';
+  titleMeta.textContent = attachments.length > 0
+    ? 'Download original files directly from the captured message.'
+    : 'No downloadable files are attached to this message.';
+
+  const headingGroup = document.createElement('div');
+  headingGroup.className = 'section-title-group';
+  headingGroup.append(title, titleMeta);
+
   const downloadOriginal = createLinkButton(
     'Download Original',
     `/api/messages/${escapeRouteSegment(messageId)}/raw`,
@@ -345,7 +370,7 @@ function renderAttachments(attachments = [], messageId) {
   );
   downloadOriginal.setAttribute('download', `message-${messageId}.eml`);
 
-  header.append(title, downloadOriginal);
+  header.append(headingGroup, downloadOriginal);
   section.appendChild(header);
 
   if (attachments.length === 0) {
@@ -365,7 +390,7 @@ function renderAttachments(attachments = [], messageId) {
 
     const badge = document.createElement('span');
     badge.className = 'attachment-badge';
-    badge.textContent = '⤓';
+    badge.textContent = '↓';
     badge.setAttribute('aria-hidden', 'true');
 
     const info = document.createElement('div');
@@ -486,6 +511,10 @@ async function renderMessageView(message) {
   const titleGroup = document.createElement('div');
   titleGroup.className = 'message-title-group';
 
+  const messageKicker = document.createElement('p');
+  messageKicker.className = 'message-kicker';
+  messageKicker.textContent = 'Captured message';
+
   const subject = document.createElement('h2');
   subject.className = 'message-subject';
   subject.textContent = message.subject || '(No subject)';
@@ -494,7 +523,19 @@ async function renderMessageView(message) {
   stamp.className = 'message-date';
   stamp.textContent = formatDate(message.message_date || message.received_at);
 
-  titleGroup.append(subject, stamp);
+  const messageSummary = document.createElement('div');
+  messageSummary.className = 'message-summary';
+
+  const senderSummary = document.createElement('span');
+  senderSummary.className = 'message-chip message-summary-chip';
+  senderSummary.textContent = message.sender || 'Unknown sender';
+
+  const attachmentSummary = document.createElement('span');
+  attachmentSummary.className = 'message-chip message-summary-chip';
+  attachmentSummary.textContent = `${message.attachments.length} attachment${message.attachments.length === 1 ? '' : 's'}`;
+
+  messageSummary.append(senderSummary, attachmentSummary);
+  titleGroup.append(messageKicker, subject, stamp, messageSummary);
   heroTop.appendChild(titleGroup);
   hero.appendChild(heroTop);
 
@@ -615,14 +656,21 @@ async function loadMailboxPage(page = 1, query = '', options = {}) {
 }
 
 function renderMessageList(messages = state.mailbox || []) {
-  const shell = renderShell('Inbox', 'A stripped-back mailbox for reading captured mail.');
+  const shell = renderShell('Inbox', 'Browse, search, and inspect captured mail with a clearer reading hierarchy.');
 
   const listPanel = document.createElement('section');
   listPanel.className = 'panel message-list-panel';
 
+  const listHeader = document.createElement('div');
+  listHeader.className = 'message-list-header';
+
   const title = document.createElement('h2');
   title.className = 'panel-title';
   title.textContent = 'Messages';
+
+  const summary = document.createElement('p');
+  summary.className = 'section-meta';
+  summary.textContent = `${state.mailboxTotal} total message${state.mailboxTotal === 1 ? '' : 's'} across ${state.totalPages} page${state.totalPages === 1 ? '' : 's'}.`;
 
   const searchBlock = document.createElement('div');
   searchBlock.className = 'message-search';
@@ -669,7 +717,8 @@ function renderMessageList(messages = state.mailbox || []) {
 
   searchField.append(searchInput, clearSearchButton);
   searchBlock.append(searchLabel, searchField);
-  listPanel.append(title, searchBlock);
+  listHeader.append(title, summary);
+  listPanel.append(listHeader, searchBlock);
 
   if (messages.length === 0) {
     const empty = document.createElement('div');
@@ -722,11 +771,23 @@ function renderMessageList(messages = state.mailbox || []) {
 
     top.append(subject, date);
 
-    const meta = document.createElement('p');
-    meta.className = 'message-list-meta';
-    meta.textContent = `${message.sender || 'Unknown sender'} · ${message.text_body ? message.text_body.slice(0, 120).replace(/\s+/g, ' ') : 'Open to inspect the message body.'}`;
+     const meta = document.createElement('p');
+     meta.className = 'message-list-meta';
+     meta.textContent = `${message.sender || 'Unknown sender'} · ${message.text_body ? message.text_body.slice(0, 120).replace(/\s+/g, ' ') : 'Open to inspect the message body.'}`;
 
-    item.append(top, meta);
+     const metaRow = document.createElement('div');
+     metaRow.className = 'message-list-row';
+
+     const senderChip = document.createElement('span');
+     senderChip.className = 'message-chip';
+     senderChip.textContent = message.sender || 'Unknown sender';
+
+     const preview = document.createElement('p');
+     preview.className = 'message-preview';
+     preview.textContent = message.text_body ? message.text_body.slice(0, 160).replace(/\s+/g, ' ') : 'Open to inspect the message body.';
+
+    metaRow.append(senderChip);
+    item.append(top, metaRow, preview, meta);
     list.appendChild(item);
   });
 
