@@ -533,6 +533,8 @@ async function buildTabPanels(message) {
 }
 
 async function renderMessageView(message) {
+  const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+  const recipients = Array.isArray(message.recipients) ? message.recipients : [];
   const shell = renderShell('Message detail', 'Inspect the message safely before downloading anything.');
 
   const toolbar = document.createElement('div');
@@ -570,7 +572,7 @@ async function renderMessageView(message) {
 
   const attachmentSummary = document.createElement('span');
   attachmentSummary.className = 'message-chip message-summary-chip';
-  attachmentSummary.textContent = `${message.attachments.length} attachment${message.attachments.length === 1 ? '' : 's'}`;
+  attachmentSummary.textContent = `${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`;
 
   messageSummary.append(senderSummary, attachmentSummary);
   titleGroup.append(messageKicker, subject, stamp, messageSummary);
@@ -582,7 +584,7 @@ async function renderMessageView(message) {
 
   fields.appendChild(buildHeaderField('From', createFieldValue(message.sender || 'Unknown sender')));
 
-  const recipientGroups = groupRecipients(message.recipients);
+  const recipientGroups = groupRecipients(recipients);
   fields.appendChild(buildHeaderField('To', createFieldValue(recipientGroups.to.join(', ') || 'No visible recipients')));
   if (recipientGroups.cc.length > 0) {
     fields.appendChild(buildHeaderField('Cc', createFieldValue(recipientGroups.cc.join(', '))));
@@ -607,7 +609,7 @@ async function renderMessageView(message) {
   }
 
   const { tabs, content } = await buildTabPanels(message);
-  shell.append(tabs, content, renderAttachments(message.attachments, message.id));
+  shell.append(tabs, content, renderAttachments(attachments, message.id));
 }
 
 function renderMessageNotFound() {
