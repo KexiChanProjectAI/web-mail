@@ -9,6 +9,8 @@ const state = {
   mailboxTotal: 0,
   searchDebounceTimer: null,
   mailboxRequestToken: 0,
+  logoutPending: false,
+  logoutError: '',
 };
 
 const ROUTES = {
@@ -82,10 +84,11 @@ function isUnauthorizedError(error) {
 }
 
 function redirectToLogin() {
-    if (window.location.pathname !== '/login') {
-        history.pushState(null, '', '/login');
-    }
-    renderLogin();
+  resetMailboxState();
+  if (window.location.pathname !== '/login') {
+    history.pushState(null, '', '/login');
+  }
+  renderLogin();
 }
 
 function escapeRouteSegment(value) {
@@ -107,6 +110,41 @@ function clearApp() {
   const app = ensureAppRoot();
   app.replaceChildren();
   return app;
+}
+
+function resetMailboxState() {
+  clearSearchDebounce();
+  state.mailbox = null;
+  state.currentPage = 1;
+  state.totalPages = 1;
+  state.currentQuery = '';
+  state.mailboxTotal = 0;
+  state.mailboxRequestToken += 1;
+  state.logoutPending = false;
+  state.logoutError = '';
+}
+
+async function handleMailboxLogout() {
+  if (state.logoutPending) {
+    return;
+  }
+
+  state.logoutPending = true;
+  state.logoutError = '';
+  renderMessageList();
+
+  try {
+    await window.API.logout();
+    redirectToLogin();
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      return;
+    }
+
+    state.logoutPending = false;
+    state.logoutError = 'We could not switch mailbox targets right now. Please try again.';
+    renderMessageList();
+  }
 }
 
 function renderLogin() {
@@ -672,6 +710,19 @@ function renderMessageList(messages = state.mailbox || []) {
   summary.className = 'section-meta';
   summary.textContent = `${state.mailboxTotal} total message${state.mailboxTotal === 1 ? '' : 's'} across ${state.totalPages} page${state.totalPages === 1 ? '' : 's'}.`;
 
+  const titleGroup = document.createElement('div');
+  titleGroup.className = 'section-title-group';
+  titleGroup.append(title, summary);
+
+  const switchMailboxButton = createButton(
+    state.logoutPending ? 'Switching mailbox…' : 'Switch mailbox target',
+    'tertiary-button',
+    () => {
+      void handleMailboxLogout();
+    },
+  );
+  switchMailboxButton.disabled = state.logoutPending;
+
   const searchBlock = document.createElement('div');
   searchBlock.className = 'message-search';
 
@@ -717,8 +768,16 @@ function renderMessageList(messages = state.mailbox || []) {
 
   searchField.append(searchInput, clearSearchButton);
   searchBlock.append(searchLabel, searchField);
-  listHeader.append(title, summary);
+  listHeader.append(titleGroup, switchMailboxButton);
   listPanel.append(listHeader, searchBlock);
+
+  if (state.logoutError) {
+    const logoutError = document.createElement('div');
+    logoutError.className = 'form-error';
+    logoutError.setAttribute('role', 'alert');
+    logoutError.textContent = state.logoutError;
+    listPanel.appendChild(logoutError);
+  }
 
   if (messages.length === 0) {
     const empty = document.createElement('div');
