@@ -72,3 +72,34 @@ func TestSessionTTL(t *testing.T) {
 		t.Errorf("SessionTTL() = %d ns, want %d ns", int64(got), want)
 	}
 }
+
+func TestTelegramDisabledByDefault(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	t.Setenv("TELEGRAM_CHAT_ID", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TelegramEnabled() {
+		t.Fatal("expected Telegram to be disabled when env is empty")
+	}
+}
+
+func TestTelegramEnabledWithCompleteEnv(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+	t.Setenv("TELEGRAM_CHAT_ID", "456")
+	t.Setenv("PUBLIC_BASE_URL", "https://mail.example.test")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.TelegramEnabled() {
+		t.Fatal("expected Telegram to be enabled when both env vars are set")
+	}
+	if cfg.TelegramBotToken != "123:abc" {
+		t.Fatalf("TelegramBotToken = %q", cfg.TelegramBotToken)
+	}
+	if cfg.TelegramChatID != "456" {
+		t.Fatalf("TelegramChatID = %q", cfg.TelegramChatID)
+	}
+}

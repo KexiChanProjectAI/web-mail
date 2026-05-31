@@ -19,6 +19,8 @@ type Config struct {
 	WorkerIngestPSK   string
 	ServerAddr        string
 	AppEnv            string
+	TelegramBotToken  string
+	TelegramChatID    string
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -35,6 +37,8 @@ func Load() (*Config, error) {
 		WorkerIngestPSK:   getEnv("WORKER_INGEST_PSK", ""),
 		ServerAddr:        getEnv("SERVER_ADDR", ":8080"),
 		AppEnv:            getEnv("APP_ENV", "production"),
+		TelegramBotToken:  getEnv("TELEGRAM_BOT_TOKEN", ""),
+		TelegramChatID:    getEnv("TELEGRAM_CHAT_ID", ""),
 	}, nil
 }
 
@@ -57,4 +61,9 @@ func getEnvInt(key string, defaultValue int64) int64 {
 // SessionTTL returns the session TTL as a time.Duration.
 func (c *Config) SessionTTL() time.Duration {
 	return time.Duration(c.SessionTTLHours) * time.Hour
+}
+
+// TelegramEnabled returns true only when both bot token and chat ID are configured.
+func (c *Config) TelegramEnabled() bool {
+	return c.TelegramBotToken != "" && c.TelegramChatID != ""
 }

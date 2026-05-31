@@ -14,22 +14,25 @@ import (
 	"time"
 
 	"lite-mail/internal/config"
+	"lite-mail/internal/db"
 	"lite-mail/internal/middleware"
 	"lite-mail/internal/storage"
+	"lite-mail/internal/telegram"
 )
 
 const ingestPSKHeader = "X-Lite-Mail-Ingest-PSK"
 
 // IngestHandler accepts authenticated raw MIME messages from the Cloudflare Worker.
 type IngestHandler struct {
-	db      *sql.DB
-	storage *storage.Storage
-	config  *config.Config
+	db              *sql.DB
+	storage         *storage.Storage
+	config          *config.Config
+	telegramService *telegram.DeliveryService
 }
 
 // NewIngestHandler wires ingest dependencies.
-func NewIngestHandler(db *sql.DB, s *storage.Storage, cfg *config.Config) *IngestHandler {
-	return &IngestHandler{db: db, storage: s, config: cfg}
+func NewIngestHandler(db *sql.DB, s *storage.Storage, cfg *config.Config, telegramService *telegram.DeliveryService) *IngestHandler {
+	return &IngestHandler{db: db, storage: s, config: cfg, telegramService: telegramService}
 }
 
 func (h *IngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +131,38 @@ func (h *IngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"message_size", len(raw),
 	)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "accepted", "message_id": messageID})
+
+	// After successful persist, attempt Telegram notification (non-blocking)
+	if h.telegramService != nil && h.config.TelegramEnabled() {
+		go func(mid int64, p *ParsedMessage) {
+			ctx := context.Background()
+			// Create or reuse share token
+			token, err := db.CreateShareToken(ctx, h.db, mid)
+			if err != nil {
+				slog.Warn("telegram: create share token", "message_id", mid, "error", err)
+				return
+			}
+
+			// Build summary from parsed message
+			summary := telegram.BuildSummary(&telegram.SummaryInput{
+				From:       p.Sender,
+				Subject:    p.Subject,
+				TextBody:   p.TextBody,
+				ReceivedAt: p.MessageDate,
+			}, h.config.PublicBaseURL, token)
+
+			// Build reply markup with URL buttons
+			markup := telegram.BuildReplyMarkup(h.config.PublicBaseURL, token)
+
+			// Send via delivery service (handles idempotency, failure recording)
+			if err := h.telegramService.Deliver(ctx, mid, summary, markup); err != nil {
+				slog.Warn("telegram: delivery failed",
+					"message_id", mid,
+					"error", err,
+				)
+			}
+		}(messageID, parsed)
+	}
 }
 
 func (h *IngestHandler) isDuplicate(ctx context.Context, contentHash string) (bool, error) {
