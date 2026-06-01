@@ -1,0 +1,20 @@
+From: noreply@example.com
+To: user@example.com
+Subject: HTML email with style
+Date: Mon, 01 Jun 2026 12:00:00 +0000
+MIME-Version: 1.0
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<html>
+<head>
+<style>
+body { font-family: sans-serif; }
+.content { color: red; }
+</style>
+</head>
+<body>
+<p>Your verification code is: <strong>123456</strong></p>
+<p style=3D"color:gray">Didn't request this? You can ignore this email.</p>
+</body>
+</html>

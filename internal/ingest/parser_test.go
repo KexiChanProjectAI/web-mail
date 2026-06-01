@@ -171,3 +171,30 @@ func TestParseMIMEHTMLOnly(t *testing.T) {
 		t.Fatal("TextBody should not contain HTML tags after conversion")
 	}
 }
+
+func TestParseMIMEHTMLWithStyleTag(t *testing.T) {
+	msg, err := ParseMIME(loadFixture(t, "html-with-style.eml"))
+	if err != nil {
+		t.Fatalf("ParseMIME: %v", err)
+	}
+
+	// Should have HTML body
+	if !strings.Contains(msg.HTMLBody, "<strong>123456</strong>") {
+		t.Fatalf("HTMLBody should contain decoded HTML with strong tag, got = %q", msg.HTMLBody)
+	}
+
+	// TextBody should contain the actual content
+	if !strings.Contains(msg.TextBody, "123456") {
+		t.Fatalf("TextBody should contain the code from HTML conversion, got = %q", msg.TextBody)
+	}
+
+	// TextBody must NOT contain CSS from <style> blocks
+	if strings.Contains(msg.TextBody, "font-family") || strings.Contains(msg.TextBody, "sans-serif") {
+		t.Fatalf("TextBody should not contain CSS from <style> tags, got = %q", msg.TextBody)
+	}
+
+	// TextBody must NOT contain HTML tags
+	if strings.Contains(msg.TextBody, "<strong>") || strings.Contains(msg.TextBody, "<p>") {
+		t.Fatal("TextBody should not contain HTML tags after conversion")
+	}
+}
