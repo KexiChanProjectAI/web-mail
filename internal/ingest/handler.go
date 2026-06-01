@@ -144,8 +144,10 @@ func (h *IngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Build summary from parsed message
+			to := formatRecipients(p.Recipients)
 			summary := telegram.BuildSummary(&telegram.SummaryInput{
 				From:       p.Sender,
+				To:         to,
 				Subject:    p.Subject,
 				TextBody:   p.TextBody,
 				ReceivedAt: p.MessageDate,
@@ -223,6 +225,20 @@ func (h *IngestHandler) persist(ctx context.Context, parsed *ParsedMessage, pars
 
 func fallbackParsedMessage(contentHash string) *ParsedMessage {
 	return &ParsedMessage{ContentHash: contentHash, MessageDate: time.Now().UTC()}
+}
+
+// formatRecipients joins recipient emails by type for Telegram summary.
+func formatRecipients(recipients []Recipient) string {
+	var to []string
+	for _, r := range recipients {
+		if r.Type == "to" {
+			to = append(to, r.Email)
+		}
+	}
+	if len(to) == 0 {
+		return "(unknown)"
+	}
+	return strings.Join(to, ", ")
 }
 
 func nullableString(value string) sql.NullString {

@@ -9,13 +9,14 @@ import (
 // SummaryInput holds the email data needed to build a Telegram summary message.
 type SummaryInput struct {
 	From       string
+	To         string
 	Subject    string
 	TextBody   string
 	ReceivedAt time.Time
 }
 
 const maxMessageLen = 3500
-const bodyPreviewLen = 500
+const bodyPreviewLen = 300
 
 // EscapeHTML escapes <, >, & for Telegram HTML parse mode.
 func EscapeHTML(s string) string {
@@ -27,17 +28,26 @@ func EscapeHTML(s string) string {
 
 // BuildSummary builds an HTML-escaped, truncated summary text for a Telegram message.
 func BuildSummary(msg *SummaryInput, baseURL, token string) string {
+	// Truncate body at preview length if too long
 	bodyPreview := msg.TextBody
 	if len(bodyPreview) > bodyPreviewLen {
 		bodyPreview = bodyPreview[:bodyPreviewLen]
 	}
 
-	text := fmt.Sprintf("📧 New Email\nFrom: %s\nSubject: %s\nReceived: %s\n\n%s",
-		EscapeHTML(msg.From),
-		EscapeHTML(msg.Subject),
-		EscapeHTML(msg.ReceivedAt.Format(time.RFC1123)),
-		EscapeHTML(bodyPreview),
-	)
+	// Build header lines without blank lines
+	parts := []string{
+		fmt.Sprintf("From: %s", EscapeHTML(msg.From)),
+		fmt.Sprintf("To: %s", EscapeHTML(msg.To)),
+		fmt.Sprintf("Subject: %s", EscapeHTML(msg.Subject)),
+		fmt.Sprintf("Date: %s", EscapeHTML(msg.ReceivedAt.Format(time.RFC1123))),
+	}
+
+	bodyPreview = EscapeHTML(bodyPreview)
+	if bodyPreview != "" {
+		parts = append(parts, bodyPreview)
+	}
+
+	text := strings.Join(parts, "\n")
 
 	if len(text) > maxMessageLen {
 		text = text[:maxMessageLen]

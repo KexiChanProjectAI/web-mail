@@ -35,8 +35,9 @@ func TestSendWithFakeServer(t *testing.T) {
 	// Override apiURL to point to test server
 	client.apiURL = srv.URL + "/bot123456:ABC-DEF/sendMessage"
 
-	msg := &SummaryInput{
+msg := &SummaryInput{
 		From:       "test@example.com",
+		To:         "recipient@example.com",
 		Subject:    "Hello",
 		TextBody:   "World",
 		ReceivedAt: time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),

@@ -34,6 +34,7 @@ func TestEscapeHTML(t *testing.T) {
 func TestPayloadEscaping(t *testing.T) {
 	msg := &SummaryInput{
 		From:       "Alice <alice@example.com>",
+		To:         "bob@example.com",
 		Subject:    "Test & <Important>",
 		TextBody:   "Hello <world> & goodbye",
 		ReceivedAt: time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
@@ -44,11 +45,17 @@ func TestPayloadEscaping(t *testing.T) {
 	if !strings.Contains(text, "Alice &lt;alice@example.com&gt;") {
 		t.Errorf("From not properly escaped in summary: %s", text)
 	}
+	if !strings.Contains(text, "bob@example.com") {
+		t.Errorf("To not found in summary: %s", text)
+	}
 	if !strings.Contains(text, "Test &amp; &lt;Important&gt;") {
 		t.Errorf("Subject not properly escaped in summary: %s", text)
 	}
 	if !strings.Contains(text, "Hello &lt;world&gt; &amp; goodbye") {
 		t.Errorf("Body not properly escaped in summary: %s", text)
+	}
+	if strings.Contains(text, "New Email") {
+		t.Errorf("Summary should not contain 'New Email' header: %s", text)
 	}
 }
 
@@ -56,6 +63,7 @@ func TestPayloadTruncation(t *testing.T) {
 	longBody := strings.Repeat("x", 5000)
 	msg := &SummaryInput{
 		From:       "sender@test.com",
+		To:         "recipient@test.com",
 		Subject:    "Big email",
 		TextBody:   longBody,
 		ReceivedAt: time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
@@ -118,18 +126,23 @@ func TestNewSendMessageRequest(t *testing.T) {
 func TestBuildSummaryEmptyFields(t *testing.T) {
 	msg := &SummaryInput{
 		From:       "",
+		To:         "",
 		Subject:    "",
 		TextBody:   "",
 		ReceivedAt: time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
 	}
 
 	text := BuildSummary(msg, "https://example.com", "abc123")
+
 	if text == "" {
 		t.Error("BuildSummary with empty fields should still produce output")
 	}
-	// Should contain the label even if values are empty
+	// Should contain the labels even if values are empty
 	if !strings.Contains(text, "From:") {
 		t.Error("BuildSummary should contain 'From:' label")
+	}
+	if !strings.Contains(text, "To:") {
+		t.Error("BuildSummary should contain 'To:' label")
 	}
 	if !strings.Contains(text, "Subject:") {
 		t.Error("BuildSummary should contain 'Subject:' label")
