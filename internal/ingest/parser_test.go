@@ -147,3 +147,27 @@ func TestParseMIMEBase64Multipart(t *testing.T) {
 		t.Fatalf("HTMLBody should contain decoded HTML, got = %q", msg.HTMLBody)
 	}
 }
+func TestParseMIMEHTMLOnly(t *testing.T) {
+	msg, err := ParseMIME(loadFixture(t, "html-only.eml"))
+	if err != nil {
+		t.Fatalf("ParseMIME: %v", err)
+	}
+	// Should have HTML body
+	if !strings.Contains(msg.HTMLBody, "281043") {
+		t.Fatalf("HTMLBody should contain the code, got = %q", msg.HTMLBody)
+	}
+	// Should have generated text body from HTML
+	if msg.TextBody == "" {
+		t.Fatal("TextBody should be generated from HTML when no text part exists")
+	}
+	if !strings.Contains(msg.TextBody, "281043") {
+		t.Fatalf("TextBody should contain the code from HTML conversion, got = %q", msg.TextBody)
+	}
+	if !strings.Contains(msg.TextBody, "输入此临时验证码") {
+		t.Fatalf("TextBody should contain decoded Chinese text, got = %q", msg.TextBody)
+	}
+	// Should not contain HTML tags
+	if strings.Contains(msg.TextBody, "<strong>") || strings.Contains(msg.TextBody, "<p>") {
+		t.Fatal("TextBody should not contain HTML tags after conversion")
+	}
+}

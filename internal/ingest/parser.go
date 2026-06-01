@@ -6,11 +6,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"html"
 	"io"
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
 	"net/mail"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -72,6 +74,12 @@ func ParseMIME(raw []byte) (*ParsedMessage, error) {
 	if err := parseEntity(msg.Header, msg.Body, parsed); err != nil {
 		return parsed, err
 	}
+
+	// If no text body was parsed and HTML body exists, convert HTML to text.
+	if parsed.TextBody == "" && parsed.HTMLBody != "" {
+		parsed.TextBody = htmlToText(parsed.HTMLBody)
+	}
+
 	return parsed, nil
 }
 
@@ -196,6 +204,31 @@ func decodeContent(header mail.Header, body io.Reader) (io.Reader, error) {
 		// Unknown encoding: return body as-is rather than failing
 		return body, nil
 	}
+}
+
+// htmlToText strips HTML tags and unescapes entities to produce plain text.
+// Used as a fallback when no text/plain part exists in the email.
+func htmlToText(s string) string {
+	// Replace <br> tags with newlines
+	brRE := regexp.MustCompile(`(?i)<br\s*/?>`)
+	s = brRE.ReplaceAllString(s, "\n")
+
+	// Add newlines after block-level closing tags
+	blockRE := regexp.MustCompile(`(?i)</(?:p|div|tr|li|h[1-6]|blockquote|pre|table)>`)
+	s = blockRE.ReplaceAllString(s, "\n")
+
+	// Strip remaining HTML tags
+	tagRE := regexp.MustCompile(`<[^>]*>`)
+	s = tagRE.ReplaceAllString(s, "")
+
+	// Unescape HTML entities
+	s = html.UnescapeString(s)
+
+	// Collapse multiple newlines to at most two
+	multiNewlineRE := regexp.MustCompile(`\n{3,}`)
+	s = multiNewlineRE.ReplaceAllString(s, "\n\n")
+
+	return strings.TrimSpace(s)
 }
 
 func canonicalEmail(email string) string {
