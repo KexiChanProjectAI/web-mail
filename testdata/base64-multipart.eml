@@ -1,0 +1,21 @@
+From: sender@example.com
+To: recipient@example.com
+Subject: Base64 encoded email
+Date: Mon, 01 Jun 2026 10:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="----=_Part_456"
+
+------=_Part_456
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+SGVsbG8gZnJvbSBiYXNlNjQh
+CgpUaGlzIGlzIHRoZSBwbGFpbiB0ZXh0IHZlcnNpb24u
+
+------=_Part_456
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+PGh0bWw+Cjxib2R5Pgo8cD5IZWxsbyBmcm9tIDxzdHJvbmc+YmFzZTY0PC9zdHJvbmc+ITwvcD4KPC9ib2R5Pgo8L2h0bWw+Cg==
+
+------=_Part_456--

@@ -3,11 +3,13 @@ package ingest
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
+	"mime/quotedprintable"
 	"net/mail"
 	"strings"
 	"time"
@@ -141,7 +143,12 @@ func parsePart(header mail.Header, body io.Reader, parsed *ParsedMessage) error 
 }
 
 func consumeLeaf(header mail.Header, body io.Reader, mediaType string, parsed *ParsedMessage) error {
-	content, err := io.ReadAll(body)
+	reader, err := decodeContent(header, body)
+	if err != nil {
+		return fmt.Errorf("decode MIME leaf: %w", err)
+	}
+
+	content, err := io.ReadAll(reader)
 	if err != nil {
 		return fmt.Errorf("read MIME leaf: %w", err)
 	}
@@ -172,6 +179,23 @@ func consumeLeaf(header mail.Header, body io.Reader, mediaType string, parsed *P
 		parsed.HTMLBody += string(content)
 	}
 	return nil
+}
+
+// decodeContent wraps the body reader with the appropriate decoder based on
+// the Content-Transfer-Encoding header. Supported: quoted-printable, base64.
+func decodeContent(header mail.Header, body io.Reader) (io.Reader, error) {
+	encoding := strings.ToLower(header.Get("Content-Transfer-Encoding"))
+	switch encoding {
+	case "quoted-printable":
+		return quotedprintable.NewReader(body), nil
+	case "base64":
+		return base64.NewDecoder(base64.StdEncoding, body), nil
+	case "":
+		return body, nil
+	default:
+		// Unknown encoding: return body as-is rather than failing
+		return body, nil
+	}
 }
 
 func canonicalEmail(email string) string {

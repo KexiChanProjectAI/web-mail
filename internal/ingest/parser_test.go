@@ -102,3 +102,48 @@ func loadFixture(t *testing.T, name string) []byte {
 	}
 	return raw
 }
+
+func TestParseMIMEQuotedPrintableHTML(t *testing.T) {
+	msg, err := ParseMIME(loadFixture(t, "quoted-printable-html.eml"))
+	if err != nil {
+		t.Fatalf("ParseMIME: %v", err)
+	}
+	if !strings.Contains(msg.HTMLBody, "<strong>565503</strong>") {
+		t.Fatalf("HTMLBody should contain decoded HTML with strong tag, got = %q", msg.HTMLBody)
+	}
+	if strings.Contains(msg.HTMLBody, "=3D") {
+		t.Fatalf("HTMLBody should not contain quoted-printable encoding artifacts (=3D), got = %q", msg.HTMLBody)
+	}
+	if msg.Subject != "Your temporary ChatGPT login code" {
+		t.Fatalf("Subject = %q", msg.Subject)
+	}
+}
+
+func TestParseMIMEQuotedPrintableMultipart(t *testing.T) {
+	msg, err := ParseMIME(loadFixture(t, "quoted-printable-multipart.eml"))
+	if err != nil {
+		t.Fatalf("ParseMIME: %v", err)
+	}
+	if !strings.Contains(msg.TextBody, "Your verification code is: 565503") {
+		t.Fatalf("TextBody should contain decoded text, got = %q", msg.TextBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "<strong>565503</strong>") {
+		t.Fatalf("HTMLBody should contain decoded HTML, got = %q", msg.HTMLBody)
+	}
+	if strings.Contains(msg.HTMLBody, "=3D") {
+		t.Fatalf("HTMLBody should not contain QP artifacts, got = %q", msg.HTMLBody)
+	}
+}
+
+func TestParseMIMEBase64Multipart(t *testing.T) {
+	msg, err := ParseMIME(loadFixture(t, "base64-multipart.eml"))
+	if err != nil {
+		t.Fatalf("ParseMIME: %v", err)
+	}
+	if !strings.Contains(msg.TextBody, "Hello from base64!") {
+		t.Fatalf("TextBody should contain decoded text, got = %q", msg.TextBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "<strong>base64</strong>") {
+		t.Fatalf("HTMLBody should contain decoded HTML, got = %q", msg.HTMLBody)
+	}
+}
