@@ -44,7 +44,7 @@ func BuildSummary(msg *SummaryInput, baseURL, token string) string {
 
 	bodyPreview = EscapeHTML(bodyPreview)
 	if bodyPreview != "" {
-		parts = append(parts, bodyPreview)
+		parts = append(parts, "", bodyPreview)
 	}
 
 	text := strings.Join(parts, "\n")
