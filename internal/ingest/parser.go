@@ -6,13 +6,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"html"
+	"jaytaylor.com/html2text"
 	"io"
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
 	"net/mail"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -206,29 +205,13 @@ func decodeContent(header mail.Header, body io.Reader) (io.Reader, error) {
 	}
 }
 
-// htmlToText strips HTML tags and unescapes entities to produce plain text.
-// Used as a fallback when no text/plain part exists in the email.
+// htmlToText converts HTML to plain text using the html2text library.
 func htmlToText(s string) string {
-	// Replace <br> tags with newlines
-	brRE := regexp.MustCompile(`(?i)<br\s*/?>`)
-	s = brRE.ReplaceAllString(s, "\n")
-
-	// Add newlines after block-level closing tags
-	blockRE := regexp.MustCompile(`(?i)</(?:p|div|tr|li|h[1-6]|blockquote|pre|table)>`)
-	s = blockRE.ReplaceAllString(s, "\n")
-
-	// Strip remaining HTML tags
-	tagRE := regexp.MustCompile(`<[^>]*>`)
-	s = tagRE.ReplaceAllString(s, "")
-
-	// Unescape HTML entities
-	s = html.UnescapeString(s)
-
-	// Collapse multiple newlines to at most two
-	multiNewlineRE := regexp.MustCompile(`\n{3,}`)
-	s = multiNewlineRE.ReplaceAllString(s, "\n\n")
-
-	return strings.TrimSpace(s)
+	text, err := html2text.FromString(s, html2text.Options{TextOnly: true})
+	if err != nil {
+		return ""
+	}
+	return text
 }
 
 func canonicalEmail(email string) string {
