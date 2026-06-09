@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -319,5 +320,71 @@ func TestIngestTelegramFailureDoesNotBlockIngest(t *testing.T) {
 	}
 	if rec.Status != "failed" {
 		t.Errorf("expected status failed, got %s", rec.Status)
+	}
+}
+
+func TestFallbackPreservesHTML(t *testing.T) {
+	raw := loadFixture(t, "html-only.eml")
+	contentHash := HashBytes(raw)
+	parseErr := fmt.Errorf("simulated parse failure: corrupt MIME boundary")
+
+	result := fallbackParsedMessageWithError(raw, contentHash, parseErr)
+
+	if result == nil {
+		t.Fatal("fallbackParsedMessageWithError returned nil")
+	}
+	if result.ContentHash != contentHash {
+		t.Errorf("ContentHash = %q, want %q", result.ContentHash, contentHash)
+	}
+	if result.HTMLBody == "" {
+		t.Error("HTMLBody should not be empty — fallback should preserve HTML")
+	}
+	if !strings.HasPrefix(result.TextBody, "[Parse Error:") {
+		t.Errorf("TextBody should start with '[Parse Error:', got %q", result.TextBody)
+	}
+	if !strings.Contains(result.TextBody, "simulated parse failure") {
+		t.Errorf("TextBody should contain the original error message, got %q", result.TextBody)
+	}
+}
+
+func TestFallbackGarbageInput(t *testing.T) {
+	garbage := []byte{0xFF, 0xFE, 0x00, 0x01, 0x02, 0x03}
+	contentHash := HashBytes(garbage)
+	parseErr := fmt.Errorf("parse error: not a valid MIME message")
+
+	result := fallbackParsedMessageWithError(garbage, contentHash, parseErr)
+
+	if result == nil {
+		t.Fatal("fallbackParsedMessageWithError returned nil on garbage input")
+	}
+	if result.ContentHash != contentHash {
+		t.Errorf("ContentHash = %q, want %q", result.ContentHash, contentHash)
+	}
+	if !strings.HasPrefix(result.TextBody, "[Parse Error:") {
+		t.Errorf("TextBody should start with '[Parse Error:', got %q", result.TextBody)
+	}
+	if result.MessageDate.IsZero() {
+		t.Error("MessageDate should be set")
+	}
+}
+
+func TestFallbackExtractsHeaders(t *testing.T) {
+	raw := loadFixture(t, "html-only.eml")
+	contentHash := HashBytes(raw)
+	parseErr := fmt.Errorf("body parse error: corrupt HTML content")
+
+	result := fallbackParsedMessageWithError(raw, contentHash, parseErr)
+
+	if result == nil {
+		t.Fatal("fallbackParsedMessageWithError returned nil")
+	}
+	if result.Subject == "" {
+		t.Error("Subject should be extracted from headers")
+	}
+	if result.Sender == "" {
+		t.Error("Sender should be extracted from headers")
+	}
+	if !strings.HasPrefix(result.TextBody, "[Parse Error:") {
+		t.Errorf("TextBody should start with '[Parse Error:', got %q", result.TextBody)
 	}
 }

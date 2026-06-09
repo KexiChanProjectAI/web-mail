@@ -47,16 +47,18 @@ type Recipient struct {
 func ParseMIME(raw []byte) (*ParsedMessage, error) {
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
 	if err != nil {
-		return nil, fmt.Errorf("read MIME message: %w", err)
+		return &ParsedMessage{ContentHash: HashBytes(raw)}, fmt.Errorf("read MIME message: %w", err)
 	}
 
 	parsed := &ParsedMessage{ContentHash: HashBytes(raw)}
 	if from := msg.Header.Get("From"); from != "" {
 		addr, err := mail.ParseAddress(from)
 		if err != nil {
-			return nil, fmt.Errorf("parse From header: %w", err)
+			parsed.Sender = from // Keep raw value on parse failure
+			// Don't return error - continue processing
+		} else {
+			parsed.Sender = canonicalEmail(addr.Address)
 		}
-		parsed.Sender = canonicalEmail(addr.Address)
 	}
 
 	parsed.Subject, err = (&mime.WordDecoder{}).DecodeHeader(msg.Header.Get("Subject"))
