@@ -406,7 +406,7 @@ describe('Email Worker', () => {
       );
     });
 
-    it('should handle network error', async () => {
+    it('should call setReject on network error', async () => {
       const { email } = await import('../src/index');
 
       const message = createMockMessage();
@@ -414,16 +414,13 @@ describe('Email Worker', () => {
       const ctx = createMockContext();
 
       mockFetch.mockRejectedValueOnce(new Error('Network connection failed'));
-
-      await expect(email(message, env, ctx)).rejects.toThrow('Network connection failed');
-
-      expect(mockConsoleError).toHaveBeenCalledWith(
-        'Ingest request failed:',
-        expect.any(Error)
+      await email(message, env, ctx);
+      expect(message.setReject).toHaveBeenCalledWith(
+        'Mail delivery failed: Network connection failed'
       );
     });
 
-    it('should handle timeout with AbortError', async () => {
+    it('should call setReject on timeout', async () => {
       const { email } = await import('../src/index');
 
       const message = createMockMessage();
@@ -431,15 +428,84 @@ describe('Email Worker', () => {
       const ctx = createMockContext();
 
       mockFetch.mockRejectedValueOnce(new DOMException('Aborted', 'AbortError'));
-
-      await expect(email(message, env, ctx)).rejects.toThrow();
-
+      await email(message, env, ctx);
       expect(mockConsoleError).toHaveBeenCalledWith(
         'Ingest request timed out:',
-        expect.objectContaining({
-          url: 'https://mail.example.com/api/ingest',
-        })
+        expect.objectContaining({ url: 'https://mail.example.com/api/ingest' })
+      );
+      expect(message.setReject).toHaveBeenCalledWith(
+        'Mail delivery failed: ingest server did not respond in time'
       );
     });
-  });
+
+    it('should call setReject on 500 response', async () => {
+      const { email } = await import('../src/index');
+      const message = createMockMessage();
+      const env = createMockEnv();
+      const ctx = createMockContext();
+
+      mockFetch.mockResolvedValueOnce(
+        new Response(null, { status: 500, statusText: 'Internal Server Error' })
+      );
+      mockFetch.mockResolvedValueOnce(
+        new Response(null, { status: 500, statusText: 'Internal Server Error' })
+      );
+
+      await email(message, env, ctx);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(message.setReject).toHaveBeenCalledWith(
+        expect.stringContaining('ingest server returned status 500')
+      );
+    });
+
+    it('should retry once on 5xx and succeed on retry', async () => {
+      const { email } = await import('../src/index');
+      const message = createMockMessage();
+      const env = createMockEnv();
+      const ctx = createMockContext();
+
+      mockFetch
+        .mockResolvedValueOnce(new Response(null, { status: 503 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'accepted' }), { status: 200 }));
+
+      await email(message, env, ctx);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(message.setReject).not.toHaveBeenCalled();
+    });
+
+    it('should retry once on 5xx and reject after second failure', async () => {
+      const { email } = await import('../src/index');
+      const message = createMockMessage();
+      const env = createMockEnv();
+      const ctx = createMockContext();
+
+      mockFetch
+        .mockResolvedValueOnce(new Response(null, { status: 503 }))
+        .mockResolvedValueOnce(new Response(null, { status: 502 }));
+
+      await email(message, env, ctx);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(message.setReject).toHaveBeenCalled();
+    });
+
+    it('should not retry on 4xx', async () => {
+      const { email } = await import('../src/index');
+      const message = createMockMessage();
+      const env = createMockEnv();
+      const ctx = createMockContext();
+
+      mockFetch.mockResolvedValueOnce(
+        new Response(null, { status: 400, statusText: 'Bad Request' })
+      );
+
+      await email(message, env, ctx);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(message.setReject).toHaveBeenCalled();
+    });
 });
+});
+

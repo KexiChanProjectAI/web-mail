@@ -96,20 +96,87 @@ async function email(
   console.log('Delivering email to ingest endpoint:', meta);
 
   try {
-    await postToIngest(ingestUrl, ingestPSK, rawMIME.buffer, meta);
+    await postToIngest(ingestUrl, ingestPSK, rawMIME.buffer as ArrayBuffer, meta);
   } catch (err) {
-    if (err instanceof RejectableDeliveryError) {
-      console.error('Rejecting email after delivery failure:', {
+    const reason = err instanceof RejectableDeliveryError
+      ? err.reason
+      : 'Mail delivery failed: unexpected error';
+    console.error('Email delivery failed:', { ...meta, reason });
+    message.setReject(reason);
+    return;
+  }
+}
+
+async function attemptIngest(
+  url: string,
+  psk: string,
+  body: ArrayBuffer,
+  meta: IngestMeta,
+  signal: AbortSignal
+): Promise<number | void> {
+  console.log('Posting email to ingest endpoint:', {
+    ...meta,
+    bodyBytes: body.byteLength,
+  });
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'message/rfc822',
+      'X-Lite-Mail-Ingest-PSK': psk,
+    },
+    body,
+    signal,
+  });
+
+  if (response.status === 401) {
+    console.error('Ingest authentication failed:', {
+      ...meta,
+      status: 401,
+    });
+    throw new RejectableDeliveryError(
+      'Ingest authentication failed',
+      'Mail delivery failed: ingest authentication rejected the message',
+    );
+  }
+
+  if (response.status === 413) {
+    console.error('Message too large:', {
+      ...meta,
+      status: 413,
+    });
+    throw new RejectableDeliveryError(
+      'Message too large',
+      'Mail delivery failed: message exceeds ingest size limits',
+    );
+  }
+
+  if (response.ok) {
+    let responseText = '';
+    try {
+      responseText = await response.text();
+      const data = JSON.parse(responseText);
+
+      if (data.status === 'accepted') {
+        console.log('Email ingested successfully:', { ...meta });
+        return;
+      }
+
+      if (data.status === 'duplicate') {
+        console.log('Duplicate email ignored:', { ...meta });
+        return;
+      }
+    } catch {
+      console.warn('Email ingested (unparseable response):', {
         ...meta,
-        reason: err.reason,
+        note: 'Could not parse response',
       });
-      message.setReject(err.reason);
       return;
     }
-
-    console.error('Email delivery failed before acknowledgement:', meta);
-    throw err;
   }
+
+  // Non-ok, non-401/413 status — return status so caller can decide on retry
+  return response.status;
 }
 
 async function postToIngest(
@@ -124,85 +191,60 @@ async function postToIngest(
   const timeout = setTimeout(() => controller.abort(), 30000);
 
   try {
-    console.log('Posting email to ingest endpoint:', {
-      ...meta,
-      bodyBytes: body.byteLength,
-    });
+    let result = await attemptIngest(url, psk, body, meta, controller.signal);
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'message/rfc822',
-        'X-Lite-Mail-Ingest-PSK': psk,
-      },
-      body,
-      signal: controller.signal,
-    });
-
-    if (response.status === 401) {
-      console.error('Ingest authentication failed:', {
-        ...meta,
-        status: 401,
-      });
-      throw new RejectableDeliveryError(
-        'Ingest authentication failed',
-        'Mail delivery failed: ingest authentication rejected the message',
-      );
+    // If result is undefined, the request was accepted (success)
+    if (result === undefined) {
+      return;
     }
 
-    if (response.status === 413) {
-      console.error('Message too large:', {
+    // If result is a status number and it's 5xx, retry once
+    if (result >= 500 && result < 600) {
+      console.warn('Ingest server returned 5xx, retrying once:', {
         ...meta,
-        status: 413,
+        status: result,
       });
-      throw new RejectableDeliveryError(
-        'Message too large',
-        'Mail delivery failed: message exceeds ingest size limits',
-      );
-    }
 
-    if (response.ok) {
-      let responseText = '';
+      // New AbortController for retry
+      const retryController = new AbortController();
+      const retryTimeout = setTimeout(() => retryController.abort(), 30000);
+
       try {
-        responseText = await response.text();
-        const data = JSON.parse(responseText);
-
-        if (data.status === 'accepted') {
-          console.log('Email ingested successfully:', {
-            ...meta,
-          });
-          return;
+        const retryResult = await attemptIngest(url, psk, body, meta, retryController.signal);
+        if (retryResult === undefined) {
+          return; // Retry succeeded
         }
-
-        if (data.status === 'duplicate') {
-          console.log('Duplicate email ignored:', {
-            ...meta,
-          });
-          return;
-        }
-      } catch {
-        console.warn('Email ingested (unparseable response):', {
-          ...meta,
-          note: 'Could not parse response',
-        });
-        return;
+        // Retry also failed — fall through to error below
+        result = retryResult;
+      } finally {
+        clearTimeout(retryTimeout);
       }
     }
 
-    console.error('Ingest endpoint returned error:', {
-      status: response.status,
-      statusText: response.statusText,
-      ...meta,
-    });
-    throw new Error(`Ingest failed with status ${response.status}`);
+    // If we reach here, both attempts failed or non-5xx error
+    throw new RejectableDeliveryError(
+      'Ingest server error',
+      `Mail delivery failed: ingest server returned status ${result}`
+    );
   } catch (err) {
+    // Re-throw RejectableDeliveryError directly — already has proper reason
+    if (err instanceof RejectableDeliveryError) {
+      throw err;
+    }
     if (err instanceof Error && err.name === 'AbortError') {
       console.error('Ingest request timed out:', { ...meta, url });
-    } else {
-      console.error('Ingest request context:', meta);
-      console.error('Ingest request failed:', err);
+      throw new RejectableDeliveryError(
+        'Ingest timeout',
+        'Mail delivery failed: ingest server did not respond in time'
+      );
     }
-    throw err;
+    console.error('Ingest request context:', meta);
+    console.error('Ingest request failed:', err);
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    throw new RejectableDeliveryError(
+      'Ingest request failed',
+      `Mail delivery failed: ${message}`
+    );
   } finally {
     clearTimeout(timeout);
   }
