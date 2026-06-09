@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"database/sql"
@@ -9,7 +10,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -107,7 +111,7 @@ func (h *IngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if parseErr != nil {
 		parserStatus = "failed"
 		parserError = sql.NullString{String: parseErr.Error(), Valid: true}
-		parsed = fallbackParsedMessage(contentHash)
+		parsed = fallbackParsedMessageWithError(raw, contentHash, parseErr)
 	}
 	if parsed.ContentHash == "" {
 		parsed.ContentHash = contentHash
@@ -223,8 +227,62 @@ func (h *IngestHandler) persist(ctx context.Context, parsed *ParsedMessage, pars
 	return messageID, nil
 }
 
-func fallbackParsedMessage(contentHash string) *ParsedMessage {
-	return &ParsedMessage{ContentHash: contentHash, MessageDate: time.Now().UTC()}
+func fallbackParsedMessageWithError(raw []byte, contentHash string, parseErr error) *ParsedMessage {
+	parsed := &ParsedMessage{
+		ContentHash: contentHash,
+		MessageDate: time.Now().UTC(),
+		TextBody:    fmt.Sprintf("[Parse Error: %s]", parseErr.Error()),
+	}
+
+	// Best-effort: try to extract headers and HTML body from raw bytes
+	msg, readErr := mail.ReadMessage(bytes.NewReader(raw))
+	if readErr != nil {
+		// Can't even read headers — return minimal fallback with error text
+		return parsed
+	}
+
+	// Extract headers (swallow individual errors)
+	if from := msg.Header.Get("From"); from != "" {
+		if addr, err := mail.ParseAddress(from); err == nil {
+			parsed.Sender = canonicalEmail(addr.Address)
+		}
+	}
+	parsed.Subject = msg.Header.Get("Subject")
+
+	// Try to extract HTML body
+	mediaType, params, mediaErr := mime.ParseMediaType(msg.Header.Get("Content-Type"))
+	if mediaErr == nil && strings.HasPrefix(strings.ToLower(mediaType), "multipart/") {
+		boundary := params["boundary"]
+		if boundary != "" {
+			reader := multipart.NewReader(msg.Body, boundary)
+			for {
+				part, partErr := reader.NextPart()
+				if partErr == io.EOF {
+					break
+				}
+				if partErr != nil {
+					break
+				}
+				partHeader := mail.Header(part.Header)
+				partMediaType, _, _ := mime.ParseMediaType(partHeader.Get("Content-Type"))
+				partMediaType = strings.ToLower(partMediaType)
+				if partMediaType == "text/html" {
+					partContent, _ := io.ReadAll(part)
+					if len(partContent) > 0 {
+						parsed.HTMLBody = string(partContent)
+						break
+					}
+				}
+			}
+		}
+	} else if strings.HasPrefix(strings.ToLower(mediaType), "text/html") {
+		content, readErr := io.ReadAll(msg.Body)
+		if readErr == nil && len(content) > 0 {
+			parsed.HTMLBody = string(content)
+		}
+	}
+
+	return parsed
 }
 
 // formatRecipients joins recipient emails by type for Telegram summary.
