@@ -1,4 +1,4 @@
-.PHONY: all build run test test-integration test-worker vet clean db-setup help
+.PHONY: all build build-worker run test test-integration test-worker vet clean db-setup verify help
 
 # Default target
 all: vet build test
@@ -6,6 +6,10 @@ all: vet build test
 # Build the server binary (migrations and frontend are embedded via go:embed)
 build:
 	go build -o bin/lite-mail ./cmd/server
+
+# Build the Cloudflare Worker (wrangler deploy --dry-run)
+build-worker:
+	cd worker && npm run build
 
 # Run the server
 run:
@@ -50,6 +54,25 @@ db-setup:
 	@echo ""
 	@echo "Migrations run automatically on first server start."
 
+# Full cross-repo verification surface for the worker-owns-telegram-delivery
+# cutover. Runs in strict order and fails fast on the first error so the
+# first failing gate stops the verification:
+#   1. go vet ./...                 (Go static analysis)
+#   2. go test ./...                (Go unit + integration tests; DB-backed
+#                                    tests skip when TEST_DATABASE_URL is unset)
+#   3. cd worker && npm test        (Worker unit tests; covers parse, render,
+#                                    Telegram client, fetch handler, and the
+#                                    email() integration end-to-end with TG
+#                                    env absent as the rollback proof)
+#   4. cd worker && npm run build   (wrangler deploy --dry-run; confirms the
+#                                    bundle compiles for Cloudflare)
+verify:
+	@echo "=== verify: 1/4 go vet ==="      && go vet ./...
+	@echo "=== verify: 2/4 go test ==="     && go test ./...
+	@echo "=== verify: 3/4 worker npm test ==="  && (cd worker && npm test)
+	@echo "=== verify: 4/4 worker npm run build ===" && (cd worker && npm run build)
+	@echo "=== verify: OK (all 4 gates passed) ==="
+
 # Show help
 help:
 	@echo "=== lite-mail Makefile ==="
@@ -60,6 +83,7 @@ help:
 	@echo "Targets:"
 	@echo "  all              Run vet, build, and test (default)"
 	@echo "  build            Build the server binary to bin/lite-mail"
+	@echo "  build-worker     Build the Cloudflare Worker (wrangler deploy --dry-run)"
 	@echo "  run              Run the server"
 	@echo "  test             Run all Go tests"
 	@echo "  test-integration Run integration tests (set TEST_DATABASE_URL)"
@@ -67,4 +91,7 @@ help:
 	@echo "  vet              Run go vet for static analysis"
 	@echo "  clean            Remove build artifacts"
 	@echo "  db-setup         Show database setup instructions"
+	@echo "  verify           Run the full cross-repo verification surface"
+	@echo "                    (go vet, go test, worker npm test, worker npm run build)"
+	@echo "                    Fails fast on the first failing gate."
 	@echo "  help             Show this help message"

@@ -11,19 +11,57 @@ compatibility_date = "2025-06-01"
 # Account ID - optional for email Workers; only required for certain wrangler
 # commands (e.g., deploying with zone-specific features). Remove/comment if not needed.
 # Found in: Cloudflare Dashboard > Workers & Pages > Overview > Account ID
-# account_id = "your-account-id-here"
+account_id = "32577a04e3c98d3f0a391040bd91c54a"
 
-# Route configuration — NOT used by Cloudflare Email Routing.
-# Email Routing routes are managed via Cloudflare Dashboard > Email > Email Routing.
-# The block below is only for optional HTTP endpoints (e.g., a health-check route).
+# ---------------------------------------------------------------------------
+# HTTP route for the public preview surface (`/email/:id?mode=text|html`).
+#
+# Cloudflare Email Routing does NOT use this route — that path is configured
+# in the Email Routing dashboard. This route is for the Worker fetch handler
+# that serves the preview links Telegram messages link to. The KV-backed
+# preview records expire after MAIL_TTL seconds and then return 404.
+# ---------------------------------------------------------------------------
 # [[routes]]
-# pattern = "mail.yourdomain.com"
+# pattern = "mail.yourdomain.com/email/*"
 # zone_name = "yourdomain.com"
 
-# Secrets MUST be set via Cloudflare Dashboard or wrangler CLI, NOT in this file.
-# Required secrets:
-#   wrangler secret put INGEST_URL
-#   wrangler secret put WORKER_INGEST_PSK
+# ---------------------------------------------------------------------------
+# KV namespace binding for the preview cache. The binding name MUST be `DB`
+# so the upstream-style Worker code (handler/fetch, db/index, mail/parse,
+# telegram/api) does not need a naming fork. Without this binding the Worker
+# fails at deploy time with `DB: KVNamespace` not satisfied.
+#
+# Provision the namespace once per Cloudflare account:
+#   wrangler kv namespace create DB
+#   wrangler kv namespace create DB --preview
+# Then paste the returned `id` and `preview_id` below.
+# ---------------------------------------------------------------------------
+[[kv_namespaces]]
+binding = "DB"
+id = "a6296acb43d44fcda7410d3a0fffafe2"
+
+# ---------------------------------------------------------------------------
+# Secrets and plaintext env vars.
+#
+# Secrets (NEVER commit): set via `wrangler secret put <name>`.
+#   INGEST_URL           - Go /api/ingest URL. REQUIRED.
+#   WORKER_INGEST_PSK    - PSK sent to Go. REQUIRED.
+#   TELEGRAM_TOKEN       - Telegram Bot API token. OPTIONAL (Telegram disabled if absent).
+#   TELEGRAM_ID          - Comma-separated chat IDs. OPTIONAL (paired with TELEGRAM_TOKEN).
+#
+# Plaintext env vars (non-secret): can go in [vars] below. These have safe
+# upstream-style defaults baked into the Worker code, so none are strictly
+# required, but a custom DOMAIN is needed for the public preview URL.
+#   DOMAIN                - e.g. "mail.yourdomain.com"
+#   MAIL_TTL              - preview cache TTL in seconds (default "86400" = 1 day)
+#   MAX_EMAIL_SIZE        - raw email cap in bytes (default "524288" = 512 KiB)
+#   MAX_EMAIL_SIZE_POLICY - "unhandled" | "truncate" | "continue" (default "truncate")
+# ---------------------------------------------------------------------------
+[vars]
+DOMAIN = "web-mail.yuanzhisheng.workers.dev"
+MAIL_TTL = "86400"
+MAX_EMAIL_SIZE = "26214400"
+MAX_EMAIL_SIZE_POLICY = "continue"
 
 # CPU time limit - NOT supported on Free plan; remove or upgrade to paid plan
 # [limits]
