@@ -40,6 +40,18 @@ export interface Env {
 	WORKER_INGEST_PSK?: string;
 }
 
+export type ParseHeaders =
+	| Headers
+	| Readonly<Record<string, string | undefined>>;
+
+export interface ParseInput {
+	from: string;
+	to: string;
+	raw: ReadableStream<Uint8Array>;
+	rawSize: number;
+	headers?: ParseHeaders;
+}
+
 /**
  * Persisted record in the `DB` KV namespace that backs a preview link.
  * Field set mirrors upstream `EmailCache` so task 2's DAO can plug in directly.

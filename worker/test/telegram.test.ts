@@ -191,6 +191,38 @@ describe("parseEmail (task 3)", () => {
 		// messageId should be the id we just generated, not empty / undefined.
 		expect(cache.messageId).toBe(cache.id);
 	});
+
+	it("(6b) parses a plain object input with Headers preserved outside ForwardableEmailMessage", async () => {
+		const { parseEmail } = await import("../src/mail/parse");
+		const raw =
+			"From: sender@example.com\r\n" +
+			"To: rcpt@example.com\r\n" +
+			"Subject: Plain input\r\n" +
+			"Message-ID: <plain-input@example.com>\r\n" +
+			"Content-Type: text/plain; charset=utf-8\r\n" +
+			"\r\n" +
+			"plain object body\r\n";
+		const bytes = new TextEncoder().encode(raw);
+
+		const cache = await parseEmail(
+			{
+				from: "sender@example.com",
+				to: "rcpt@example.com",
+				raw: makeRawStream(raw),
+				rawSize: bytes.byteLength,
+				headers: new Headers({
+					"Message-ID": "<plain-input@example.com>",
+					Subject: "Plain input",
+				}),
+			},
+			1024 * 1024,
+			"continue",
+		);
+
+		expect(cache.messageId).toBe("<plain-input@example.com>");
+		expect(cache.subject).toBe("Plain input");
+		expect(cache.text).toContain("plain object body");
+	});
 });
 
 describe("createTelegramBotAPI (task 3)", () => {

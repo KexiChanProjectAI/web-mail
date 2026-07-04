@@ -2,7 +2,7 @@ import type {
 	ExecutionContext,
 	ForwardableEmailMessage,
 } from "@cloudflare/workers-types";
-import type { Env, EmailCache } from "./types";
+import type { Env, EmailCache, ParseInput } from "./types";
 import { Dao } from "./db";
 import { parseEmail } from "./mail/parse";
 import { renderEmail } from "./mail/render";
@@ -183,10 +183,13 @@ async function email(
 	// source of truth and will still receive the full message body.
 	let cache: EmailCache;
 	try {
-		const messageForParse = {
-			...message,
+		const messageForParse: ParseInput = {
+			headers: message.headers,
+			from: message.from,
+			to: message.to,
+			rawSize: message.rawSize,
 			raw: streamFromBytes(rawMIME),
-		} as ForwardableEmailMessage;
+		};
 		cache = await parseEmail(
 			messageForParse,
 			resolveMaxEmailSize(env),

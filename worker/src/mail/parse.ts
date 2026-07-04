@@ -1,10 +1,33 @@
-import type { ForwardableEmailMessage } from "@cloudflare/workers-types";
-import type { EmailCache, MaxEmailSizePolicy } from "../types";
+import type {
+	EmailCache,
+	MaxEmailSizePolicy,
+	ParseHeaders,
+	ParseInput,
+} from "../types";
 import PostalMime, { type RawEmail } from "postal-mime";
 import { convert } from "html-to-text";
 
+function getHeaderValue(
+	headers: ParseHeaders | undefined,
+	name: string,
+): string | null {
+	if (!headers) {
+		return null;
+	}
+	if (headers instanceof Headers) {
+		return headers.get(name);
+	}
+	const normalizedName = name.toLowerCase();
+	for (const [key, value] of Object.entries(headers)) {
+		if (key.toLowerCase() === normalizedName) {
+			return value ?? null;
+		}
+	}
+	return null;
+}
+
 /**
- * Parse a Cloudflare `ForwardableEmailMessage` into the upstream-compatible
+ * Parse a Cloudflare Email-like input into the upstream-compatible
  * `EmailCache` shape used for both Telegram rendering and KV preview cache.
  *
  * Adapted from upstream `TBXark/mail2telegram` (`src/mail/parse.ts`) and
@@ -24,17 +47,17 @@ import { convert } from "html-to-text";
  * authoritative, which is what task 3 needs for the lite-mail message shape.
  */
 export async function parseEmail(
-	message: ForwardableEmailMessage,
+	message: ParseInput,
 	maxSize: number,
 	maxSizePolicy: MaxEmailSizePolicy,
 ): Promise<EmailCache> {
 	const id = crypto.randomUUID();
 	const cache: EmailCache = {
 		id,
-		messageId: message.headers.get("Message-ID")?.trim() || id,
+		messageId: getHeaderValue(message.headers, "Message-ID")?.trim() || id,
 		from: message.from,
 		to: message.to,
-		subject: message.headers.get("Subject") ?? "",
+		subject: getHeaderValue(message.headers, "Subject") ?? "",
 	};
 
 	let isTruncate = false;
