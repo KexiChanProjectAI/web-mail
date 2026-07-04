@@ -15,7 +15,6 @@ import (
 	"lite-mail/internal/ingest"
 	"lite-mail/internal/middleware"
 	"lite-mail/internal/storage"
-	"lite-mail/internal/telegram"
 )
 
 const (
@@ -65,18 +64,7 @@ func New(cfg *config.Config, db *sql.DB) *Server {
 	s.messageHandler = api.NewMessageHandler(db, store, cfg)
 	s.attachmentHandler = api.NewAttachmentHandler(db, store, cfg)
 
-	// Wire Telegram client and delivery service if configured
-	var telegramService *telegram.DeliveryService
-	if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
-		tgClient := telegram.NewClient(telegram.Config{
-			BotToken: cfg.TelegramBotToken,
-			ChatID:   cfg.TelegramChatID,
-			BaseURL:  cfg.PublicBaseURL,
-		})
-		telegramService = telegram.NewDeliveryService(db, cfg, tgClient)
-	}
-	s.ingestHandler = ingest.NewIngestHandler(db, store, cfg, telegramService)
-	shareHandler := NewShareHandler(db, store, cfg)
+	s.ingestHandler = ingest.NewIngestHandler(db, store, cfg)
 
 	r.Use(middleware.RequestID("X-Request-ID"))
 	r.Use(middleware.SecurityHeaders)
@@ -112,10 +100,14 @@ func New(cfg *config.Config, db *sql.DB) *Server {
 		r.Get("/api/messages/{id}/attachments/{idx}", s.attachmentHandler.GetAttachment)
 	})
 
-	// Share routes — public, no auth required; MUST be before SPA catch-all
-	r.Get("/share/{token}", shareHandler.ServeHTML)
-	r.Get("/share/{token}/html", shareHandler.ServeHTML)
-	r.Get("/share/{token}/txt", shareHandler.ServeTXT)
+	// Note: the public /share/{token} preview routes were intentionally
+	// retired in favor of the Cloudflare Worker, which now hosts
+	// /email/:id?mode=text|html as the canonical preview surface. The
+	// Go share handler, db.CreateShareToken / FindMessageIDByToken helpers,
+	// share_tokens table, and Telegram delivery table have all been
+	// removed (see migration 003_drop_share_and_delivery_tables). Any
+	// previously-issued /share/{token} URLs will return 404 from the
+	// SPA catch-all below; new previews are minted by the Worker.
 	r.Get("/", spaHandler)
 	r.Get("/login", spaHandler)
 	r.Get("/messages/{id}", spaHandler)
