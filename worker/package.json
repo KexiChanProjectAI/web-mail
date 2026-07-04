@@ -1,7 +1,7 @@
 {
   "name": "lite-mail-worker",
   "version": "0.1.0",
-  "description": "Cloudflare Email Worker for lite-mail ingest",
+  "description": "Cloudflare Worker for lite-mail ingest and worker-owned Telegram delivery (upstream-style module surface)",
   "main": "src/index.ts",
   "scripts": {
     "test": "vitest run",
@@ -15,5 +15,10 @@
     "vitest": "^2.1.8",
     "wrangler": "^4.1.0"
   },
-  "private": true
+  "private": true,
+  "dependencies": {
+    "html-to-text": "^10.0.0",
+    "itty-router": "^5.0.24",
+    "postal-mime": "^2.7.5"
+  }
 }

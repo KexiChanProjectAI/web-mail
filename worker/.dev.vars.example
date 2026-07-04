@@ -1,8 +1,47 @@
-# Worker secrets for local development.
+# Worker secrets and local-only env vars.
 # Copy this file to .dev.vars and fill in your values.
 # .dev.vars is NOT committed to git (.gitignore should exclude it).
 #
-# For production, use: wrangler secret put <name>
+# For production, use: wrangler secret put <name> for secrets and
+# wrangler.toml [vars] for plaintext env vars. Never put real Telegram
+# tokens in source control.
 
+# --- lite-mail ingest (unchanged) ---
+# Full URL to the Go service /api/ingest endpoint. The Worker POSTs the raw
+# MIME here with the X-Lite-Mail-Ingest-PSK header. REQUIRED.
 INGEST_URL=http://localhost:8080/api/ingest
+# Pre-shared key sent to Go for ingest authentication. REQUIRED.
 WORKER_INGEST_PSK=change_me_worker_ingest_psk
+
+# --- Telegram (Worker-owned) ---
+# Telegram bot token from @BotFather (e.g. "1234567890:AA...").
+# Leave blank to disable Telegram sending (Go ingest still works without it).
+TELEGRAM_TOKEN=
+# Comma-separated chat IDs that receive forwarded mail (user, group, channel).
+TELEGRAM_ID=
+
+# --- Preview / KV cache config ---
+# Worker domain used to build the public /email/:id preview URLs
+# (e.g. "mail.example.workers.dev"). Used to render the View as TXT / View as
+# HTML buttons inside the Telegram message.
+DOMAIN=mail.example.workers.dev
+# Preview cache TTL in seconds. Each /email/:id link expires this many seconds
+# after the email is ingested and then returns 404. Default 86400 (1 day).
+# IMPORTANT: this is a CACHE TTL, not an archival promise — durable storage
+# remains in the Go service.
+MAIL_TTL=86400
+# Max raw email size in bytes; default 524288 (512 KiB). Emails larger than
+# this are handled per MAX_EMAIL_SIZE_POLICY below.
+MAX_EMAIL_SIZE=524288
+# `unhandled` | `truncate` | `continue`. Default `truncate`.
+#   unhandled: reject oversized mail before parse (caller gets setReject)
+#   truncate:  parse the first MAX_EMAIL_SIZE bytes and continue
+#   continue:  parse anyway and let the runtime stream handle the overflow
+MAX_EMAIL_SIZE_POLICY=truncate
+
+# --- KV binding `DB` ---
+# The KV namespace binding `DB` is configured in wrangler.toml via the
+# [[kv_namespaces]] block, NOT in this file. wrangler dev will error out at
+# startup if the binding is missing.
+# See worker/README.md "KV Namespace Setup" for the one-time provisioning
+# command: `npx wrangler kv namespace create DB`.
