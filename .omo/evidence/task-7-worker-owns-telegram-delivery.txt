@@ -1,0 +1,124 @@
+=== go vet ./... ===
+vet exit: 0
+
+=== go build ./... ===
+build exit: 0
+
+=== go test -count=1 ./... ===
+?   	lite-mail/cmd/server	[no test files]
+ok  	lite-mail/internal/api	0.008s
+ok  	lite-mail/internal/auth	0.010s
+ok  	lite-mail/internal/config	0.007s
+ok  	lite-mail/internal/db	0.009s
+ok  	lite-mail/internal/ingest	0.010s
+ok  	lite-mail/internal/middleware	0.008s
+ok  	lite-mail/internal/server	0.008s
+ok  	lite-mail/internal/storage	0.007s
+?   	lite-mail/internal/testutil	[no test files]
+ok  	lite-mail/tests/integration	0.008s
+test exit: 0
+
+=== verbose: internal/config ===
+=== RUN   TestLoadDefaults
+--- PASS: TestLoadDefaults (0.00s)
+=== RUN   TestLoadEnvOverride
+--- PASS: TestLoadEnvOverride (0.00s)
+=== RUN   TestSessionTTL
+--- PASS: TestSessionTTL (0.00s)
+PASS
+ok  	lite-mail/internal/config	0.005s
+=== cd worker && npm test ===
+
+> lite-mail-worker@0.1.0 test
+> vitest run
+
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+
+ RUN  v2.1.9 /home/kexi/web-mail/worker
+
+ ✓ test/fetch.test.ts (10 tests) 86ms
+ ✓ test/contract.test.ts (8 tests) 154ms
+ ✓ test/integration.test.ts (10 tests) 183ms
+ ✓ test/telegram.test.ts (16 tests) 192ms
+ ✓ test/index.test.ts (16 tests) 203ms
+
+ Test Files  5 passed (5)
+      Tests  60 passed (60)
+   Start at  02:40:59
+   Duration  943ms (transform 613ms, setup 0ms, collect 710ms, tests 817ms, environment 1ms, prepare 520ms)
+
+test exit: 0
+
+=== cd worker && npm run build ===
+
+> lite-mail-worker@0.1.0 build
+> wrangler deploy --dry-run
+
+
+ ⛅️ wrangler 4.93.0 (update available 4.107.0)
+──────────────────────────────────────────────
+Total Upload: 428.60 KiB / gzip: 121.40 KiB
+No bindings found.
+--dry-run: exiting now.
+build exit: 0
+
+=== grep guard: stale Telegram env var names in production code/docs ===
+--- *.go ---
+go matches: 0
+--- *.md ---
+./.omo/drafts/worker-owns-telegram-delivery.md:31:- Go server only wires Telegram sender dependencies when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are configured. Evidence: internal/server/server.go:68-78; internal/config/config.go:66-69.
+./.omo/notepads/worker-owns-telegram-delivery/learnings.md:631:- Did NOT remove `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` from
+./.omo/plans/worker-owns-telegram-delivery.md:143:  Acceptance criteria (agent-executable): text search of repo docs/config finds no Go `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` guidance; Worker docs include KV binding + route setup + TTL warning; `cd worker && npm run build` still succeeds after config/doc changes.
+md matches: 3
+--- *.example ---
+example matches: 0
+--- *.toml ---
+toml matches: 0
+
+=== filtered to production (excludes .omo/ and .git/) ===
+filtered exit: 1
+
+=== cfg.Telegram* field/method references in Go (should be 0) ===
+exit: 1
+
+=== diff summary (modified files) ===
+ M .env.example
+ M README.md
+ M internal/config/config.go
+ M internal/config/config_test.go
+ M internal/db/models.go
+ D internal/db/share.go
+ D internal/db/share_test.go
+ D internal/db/telegram.go
+ D internal/db/telegram_test.go
+ M internal/ingest/handler.go
+ M internal/ingest/handler_test.go
+ M internal/server/server.go
+ D internal/server/share.go
+ D internal/server/share_test.go
+ D internal/telegram/client.go
+ D internal/telegram/client_test.go
+ D internal/telegram/delivery.go
+ D internal/telegram/delivery_test.go
+ D internal/telegram/payload.go
+ D internal/telegram/payload_test.go
+ D internal/telegram/types.go
+ M worker/.dev.vars.example
+ M worker/README.md
+ M worker/package-lock.json
+ M worker/package.json
+ M worker/src/index.ts
+ M worker/test/index.test.ts
+ M worker/wrangler.toml
+?? .omo/
+?? internal/db/migrations/003_drop_share_and_delivery_tables.down.sql
+?? internal/db/migrations/003_drop_share_and_delivery_tables.up.sql
+?? worker/src/db/
+?? worker/src/handler/
+?? worker/src/mail/
+?? worker/src/telegram/
+?? worker/src/types/
+?? worker/test/contract.test.ts
+?? worker/test/fetch.test.ts
+?? worker/test/integration.test.ts
+?? worker/test/telegram.test.ts

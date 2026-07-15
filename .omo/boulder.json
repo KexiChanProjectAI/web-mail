@@ -1,0 +1,249 @@
+{
+  "schema_version": 2,
+  "active_work_id": "worker-owns-telegram-delivery-18dcf9ba",
+  "works": {
+    "worker-owns-telegram-delivery-18dcf9ba": {
+      "work_id": "worker-owns-telegram-delivery-18dcf9ba",
+      "active_plan": "/home/kexi/web-mail/.omo/plans/worker-owns-telegram-delivery.md",
+      "plan_name": "worker-owns-telegram-delivery",
+      "status": "completed",
+      "started_at": "2026-07-04T05:49:33.374Z",
+      "updated_at": "2026-07-04T06:56:05.317Z",
+      "session_ids": [
+        "opencode:ses_0d453315dffe79mdsqeZH41vaK"
+      ],
+      "session_origins": {
+        "opencode:ses_0d453315dffe79mdsqeZH41vaK": "direct"
+      },
+      "agent": "atlas",
+      "task_sessions": {
+        "todo:1": {
+          "task_key": "todo:1",
+          "task_label": "1",
+          "task_title": "`worker/.dev.vars.example` was claimed updated but was NOT modified \u2014 add example values for `TELEGRAM_TOKEN`, `TELEGRAM_ID`, `DOMAIN`, `MAIL_TTL`, `MAX_EMAIL_SIZE`, `MAX_EMAIL_SIZE_POLICY` alongside the existing `INGEST_URL` and `WORKER_INGEST_PSK`.",
+          "session_id": "opencode:ses_0d45186eaffeEZAW6dKvNs5tXx",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "started_at": "2026-07-04T05:56:45.836Z",
+          "status": "completed",
+          "updated_at": "2026-07-04T06:02:51.009Z",
+          "ended_at": "2026-07-04T06:02:51.009Z",
+          "elapsed_ms": 365173
+        },
+        "todo:2": {
+          "task_key": "todo:2",
+          "task_label": "2",
+          "task_title": "Worker preview cache + `/email/:id` fetch surface: adopt upstream share-link model directly",
+          "session_id": "opencode:ses_0d4462ffbffe4GZ9Qlfq5UGrMw",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-07-04T06:15:10.999Z",
+          "started_at": "2026-07-04T06:10:00.906Z",
+          "status": "completed",
+          "ended_at": "2026-07-04T06:15:10.999Z",
+          "elapsed_ms": 310093
+        },
+        "todo:4": {
+          "task_key": "todo:4",
+          "task_label": "4",
+          "task_title": "Worker email-flow integration: keep raw MIME ingest, parse locally, cache/send only on accepted ingest",
+          "session_id": "opencode:ses_0d43a9571ffego48M4g2SAJnr5",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-07-04T06:24:02.209Z",
+          "started_at": "2026-07-04T06:22:25.947Z",
+          "status": "completed",
+          "ended_at": "2026-07-04T06:24:02.209Z",
+          "elapsed_ms": 96262
+        },
+        "todo:5": {
+          "task_key": "todo:5",
+          "task_label": "5",
+          "task_title": "Go ingest/server cleanup: strip Telegram sender wiring while keeping raw MIME web-mail ingest stable",
+          "session_id": "opencode:ses_0d432176affezSGBgiKx4QoGzj",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-07-04T06:30:25.707Z",
+          "started_at": "2026-07-04T06:29:34.320Z",
+          "status": "completed",
+          "ended_at": "2026-07-04T06:30:25.707Z",
+          "elapsed_ms": 51387
+        },
+        "todo:6": {
+          "task_key": "todo:6",
+          "task_label": "6",
+          "task_title": "Go share/telegram code retirement: remove routes, DB helpers, tables, and tests that no longer belong to web mail",
+          "session_id": "opencode:ses_0d42cbe73ffeId6mFk6BMfyBL2",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-07-04T06:35:26.312Z",
+          "started_at": "2026-07-04T06:34:38.577Z",
+          "status": "completed",
+          "ended_at": "2026-07-04T06:35:26.312Z",
+          "elapsed_ms": 47735
+        },
+        "todo:7": {
+          "task_key": "todo:7",
+          "task_label": "7",
+          "task_title": "Config/docs cleanup: move Telegram ownership fully into Worker and document TTL-bound preview behavior",
+          "session_id": "opencode:ses_0d4284032ffeYo9XFVsoeO2l40",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-07-04T06:43:26.211Z",
+          "started_at": "2026-07-04T06:42:34.640Z",
+          "status": "completed",
+          "ended_at": "2026-07-04T06:43:26.211Z",
+          "elapsed_ms": 51571
+        },
+        "todo:8": {
+          "task_key": "todo:8",
+          "task_label": "8",
+          "task_title": "Cutover harness + final regression surface: make the migration safe to deploy and verify end-to-end",
+          "session_id": "opencode:ses_0d4210a21ffeYum3Mg3hKEH6xP",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-07-04T06:47:41.424Z",
+          "started_at": "2026-07-04T06:46:52.823Z",
+          "status": "completed",
+          "ended_at": "2026-07-04T06:47:41.424Z",
+          "elapsed_ms": 48601
+        },
+        "final-wave:f1": {
+          "task_key": "final-wave:f1",
+          "task_label": "F1",
+          "task_title": "Plan compliance audit",
+          "session_id": "opencode:ses_0d41cc157ffeukfZKFw3WM3dlU",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-07-04T06:54:47.624Z",
+          "started_at": "2026-07-04T06:53:25.496Z",
+          "status": "completed",
+          "ended_at": "2026-07-04T06:54:47.624Z",
+          "elapsed_ms": 82128
+        }
+      },
+      "ended_at": "2026-07-04T06:57:00.000Z",
+      "elapsed_ms": 3991943
+    }
+  },
+  "active_plan": "/home/kexi/web-mail/.omo/plans/worker-owns-telegram-delivery.md",
+  "started_at": "2026-07-04T05:49:33.374Z",
+  "status": "completed",
+  "updated_at": "2026-07-04T06:56:05.317Z",
+  "session_ids": [
+    "opencode:ses_0d453315dffe79mdsqeZH41vaK"
+  ],
+  "session_origins": {
+    "opencode:ses_0d453315dffe79mdsqeZH41vaK": "direct"
+  },
+  "plan_name": "worker-owns-telegram-delivery",
+  "task_sessions": {
+    "todo:1": {
+      "task_key": "todo:1",
+      "task_label": "1",
+      "task_title": "`worker/.dev.vars.example` was claimed updated but was NOT modified \u2014 add example values for `TELEGRAM_TOKEN`, `TELEGRAM_ID`, `DOMAIN`, `MAIL_TTL`, `MAX_EMAIL_SIZE`, `MAX_EMAIL_SIZE_POLICY` alongside the existing `INGEST_URL` and `WORKER_INGEST_PSK`.",
+      "session_id": "opencode:ses_0d45186eaffeEZAW6dKvNs5tXx",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "started_at": "2026-07-04T05:56:45.836Z",
+      "status": "completed",
+      "updated_at": "2026-07-04T06:02:51.009Z",
+      "ended_at": "2026-07-04T06:02:51.009Z",
+      "elapsed_ms": 365173
+    },
+    "todo:2": {
+      "task_key": "todo:2",
+      "task_label": "2",
+      "task_title": "Worker preview cache + `/email/:id` fetch surface: adopt upstream share-link model directly",
+      "session_id": "opencode:ses_0d4462ffbffe4GZ9Qlfq5UGrMw",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-07-04T06:15:10.999Z",
+      "started_at": "2026-07-04T06:10:00.906Z",
+      "status": "completed",
+      "ended_at": "2026-07-04T06:15:10.999Z",
+      "elapsed_ms": 310093
+    },
+    "todo:4": {
+      "task_key": "todo:4",
+      "task_label": "4",
+      "task_title": "Worker email-flow integration: keep raw MIME ingest, parse locally, cache/send only on accepted ingest",
+      "session_id": "opencode:ses_0d43a9571ffego48M4g2SAJnr5",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-07-04T06:24:02.209Z",
+      "started_at": "2026-07-04T06:22:25.947Z",
+      "status": "completed",
+      "ended_at": "2026-07-04T06:24:02.209Z",
+      "elapsed_ms": 96262
+    },
+    "todo:5": {
+      "task_key": "todo:5",
+      "task_label": "5",
+      "task_title": "Go ingest/server cleanup: strip Telegram sender wiring while keeping raw MIME web-mail ingest stable",
+      "session_id": "opencode:ses_0d432176affezSGBgiKx4QoGzj",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-07-04T06:30:25.707Z",
+      "started_at": "2026-07-04T06:29:34.320Z",
+      "status": "completed",
+      "ended_at": "2026-07-04T06:30:25.707Z",
+      "elapsed_ms": 51387
+    },
+    "todo:6": {
+      "task_key": "todo:6",
+      "task_label": "6",
+      "task_title": "Go share/telegram code retirement: remove routes, DB helpers, tables, and tests that no longer belong to web mail",
+      "session_id": "opencode:ses_0d42cbe73ffeId6mFk6BMfyBL2",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-07-04T06:35:26.312Z",
+      "started_at": "2026-07-04T06:34:38.577Z",
+      "status": "completed",
+      "ended_at": "2026-07-04T06:35:26.312Z",
+      "elapsed_ms": 47735
+    },
+    "todo:7": {
+      "task_key": "todo:7",
+      "task_label": "7",
+      "task_title": "Config/docs cleanup: move Telegram ownership fully into Worker and document TTL-bound preview behavior",
+      "session_id": "opencode:ses_0d4284032ffeYo9XFVsoeO2l40",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-07-04T06:43:26.211Z",
+      "started_at": "2026-07-04T06:42:34.640Z",
+      "status": "completed",
+      "ended_at": "2026-07-04T06:43:26.211Z",
+      "elapsed_ms": 51571
+    },
+    "todo:8": {
+      "task_key": "todo:8",
+      "task_label": "8",
+      "task_title": "Cutover harness + final regression surface: make the migration safe to deploy and verify end-to-end",
+      "session_id": "opencode:ses_0d4210a21ffeYum3Mg3hKEH6xP",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-07-04T06:47:41.424Z",
+      "started_at": "2026-07-04T06:46:52.823Z",
+      "status": "completed",
+      "ended_at": "2026-07-04T06:47:41.424Z",
+      "elapsed_ms": 48601
+    },
+    "final-wave:f1": {
+      "task_key": "final-wave:f1",
+      "task_label": "F1",
+      "task_title": "Plan compliance audit",
+      "session_id": "opencode:ses_0d41cc157ffeukfZKFw3WM3dlU",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-07-04T06:54:47.624Z",
+      "started_at": "2026-07-04T06:53:25.496Z",
+      "status": "completed",
+      "ended_at": "2026-07-04T06:54:47.624Z",
+      "elapsed_ms": 82128
+    }
+  },
+  "agent": "atlas",
+  "ended_at": "2026-07-04T06:56:05.317Z",
+  "elapsed_ms": 3991943
+}

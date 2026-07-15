@@ -1,0 +1,17 @@
+
+> lite-mail-worker@0.1.0 test
+> vitest run
+
+
+ RUN  v2.1.9 /home/kexi/web-mail/worker
+
+ ✓ test/fetch.test.ts (10 tests) 83ms
+ ✓ test/index.test.ts (16 tests) 93ms
+ ✓ test/contract.test.ts (8 tests) 154ms
+ ✓ test/telegram.test.ts (16 tests) 182ms
+
+ Test Files  4 passed (4)
+      Tests  50 passed (50)
+   Start at  02:12:53
+   Duration  910ms (transform 432ms, setup 0ms, collect 437ms, tests 512ms, environment 1ms, prepare 425ms)
+

@@ -1,0 +1,59 @@
+worker parse-input fix evidence
+date: 2026-07-04
+
+root cause
+- `worker/src/index.ts` spread `ForwardableEmailMessage` into a fake object before calling `parseEmail()`.
+- Cloudflare `ForwardableEmailMessage` properties like `headers` are not safe to preserve via object spread.
+- The reconstructed object lost a usable `headers` object, so `parseEmail()` hit `message.headers.get(...)` on `undefined`.
+
+code changes
+- `worker/src/index.ts`
+  - replaced `{ ...message, raw: streamFromBytes(rawMIME) }` with an explicit plain `ParseInput` object:
+    `{ headers: message.headers, from: message.from, to: message.to, rawSize: message.rawSize, raw: streamFromBytes(rawMIME) }`
+- `worker/src/mail/parse.ts`
+  - `parseEmail()` now accepts `ParseInput`
+  - added `getHeaderValue()` so header access is normalized through `Headers` or a map-like object
+- `worker/src/types/index.ts`
+  - added `ParseHeaders` and `ParseInput`
+- `worker/test/telegram.test.ts`
+  - added regression coverage for parsing a plain object input with preserved `Headers`
+
+verification
+1) lsp_diagnostics
+- `worker/src/mail/parse.ts`: clean
+- `worker/src/types/index.ts`: clean
+- `worker/test/telegram.test.ts`: clean
+- `worker/src/index.ts`: only pre-existing TS6133 unused `ctx`
+
+2) tests
+command: `cd worker && npm test`
+result:
+✓ test/fetch.test.ts (10 tests)
+✓ test/contract.test.ts (8 tests)
+✓ test/telegram.test.ts (17 tests)
+✓ test/index.test.ts (16 tests)
+✓ test/integration.test.ts (10 tests)
+Test Files  5 passed (5)
+
+3) build
+command: `cd worker && npm run build`
+result:
+- wrangler deploy --dry-run passed
+- upload: 429.10 KiB / gzip: 121.52 KiB
+- bindings included `env.DB (a6296acb43d44fcda7410d3a0fffafe2)`
+
+4) deploy
+command: `cd worker && npx wrangler deploy`
+result:
+- deployed worker: `web-mail`
+- url: `https://web-mail.yuanzhisheng.workers.dev`
+- version id: `f170b317-5cc4-41b0-b558-e84d38e13e6e`
+
+post-write review
+- single responsibility: parse normalization only; no Go ingest contract changes
+- boundary purity: parse input shape is explicit and typed
+- variant discrimination: unchanged
+- escape hatches: no new `any`, `@ts-ignore`, or non-null assertions introduced
+- defensive layer: fixed the root cause instead of masking missing headers with optional chaining
+- tests: regression covered by parser unit test and full worker suite
+- note: `worker/src/index.ts` remains an oversized pre-existing file (394 pure LOC); this fix was kept minimal and did not widen the architecture change scope

@@ -1,0 +1,10 @@
+
+> lite-mail-worker@0.1.0 build
+> wrangler deploy --dry-run
+
+
+ ⛅️ wrangler 4.93.0 (update available 4.107.0)
+──────────────────────────────────────────────
+Total Upload: 6.81 KiB / gzip: 2.21 KiB
+No bindings found.
+--dry-run: exiting now.

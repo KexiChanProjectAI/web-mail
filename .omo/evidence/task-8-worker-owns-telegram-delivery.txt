@@ -1,0 +1,45 @@
+=== verify: 1/4 go vet ===
+=== verify: 2/4 go test ===
+?   	lite-mail/cmd/server	[no test files]
+ok  	lite-mail/internal/api	(cached)
+ok  	lite-mail/internal/auth	(cached)
+ok  	lite-mail/internal/config	(cached)
+ok  	lite-mail/internal/db	(cached)
+ok  	lite-mail/internal/ingest	(cached)
+ok  	lite-mail/internal/middleware	(cached)
+ok  	lite-mail/internal/server	(cached)
+ok  	lite-mail/internal/storage	(cached)
+?   	lite-mail/internal/testutil	[no test files]
+ok  	lite-mail/tests/integration	(cached)
+=== verify: 3/4 worker npm test ===
+
+> lite-mail-worker@0.1.0 test
+> vitest run
+
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+
+ RUN  v2.1.9 /home/kexi/web-mail/worker
+
+ ✓ test/fetch.test.ts (10 tests) 85ms
+ ✓ test/contract.test.ts (8 tests) 142ms
+ ✓ test/telegram.test.ts (16 tests) 168ms
+ ✓ test/index.test.ts (16 tests) 190ms
+ ✓ test/integration.test.ts (10 tests) 188ms
+
+ Test Files  5 passed (5)
+      Tests  60 passed (60)
+   Start at  02:45:53
+   Duration  908ms (transform 567ms, setup 0ms, collect 651ms, tests 772ms, environment 2ms, prepare 540ms)
+
+=== verify: 4/4 worker npm run build ===
+
+> lite-mail-worker@0.1.0 build
+> wrangler deploy --dry-run
+
+
+ ⛅️ wrangler 4.93.0 (update available 4.107.0)
+──────────────────────────────────────────────
+Total Upload: 428.60 KiB / gzip: 121.40 KiB
+No bindings found.
+--dry-run: exiting now.
+=== verify: OK (all 4 gates passed) ===

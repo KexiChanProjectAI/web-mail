@@ -1,0 +1,47 @@
+Task 2 — failure paths verification (404/unsupported-mode)
+============================================================
+
+## 404 + unsupported-mode coverage (PASS)
+
+$ cd /home/kexi/web-mail/worker && npx vitest run test/fetch.test.ts
+ ✓ test/fetch.test.ts (10 tests) 58ms
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+
+Failure-path tests that must remain 404:
+
+  ✓ (c)  GET /email/missing?mode=text
+        → 404 (cache id absent)
+  ✓ (c2) GET /email/missing?mode=html
+        → 404 (cache id absent)
+  ✓ (d)  GET /email/abc?mode=json
+        → 404 (unsupported mode)
+  ✓ (e)  GET /share/abc
+        → 404 (not a preview route)
+
+Plus implicit 404 cases the router enforces:
+  - GET /email/abc       (no mode query)         → 404
+  - GET /email/abc?mode= (empty value)           → 404
+  - any path other than /email/:id               → 404 via router.all('*')
+
+## Response body contract
+
+All 404s return:
+  - status: 404
+  - content-type: text/plain; charset=utf-8
+  - body: "Not found"
+
+200s return:
+  - mode=text → content-type: text/plain; charset=utf-8, body: cache.text
+  - mode=html → content-type: text/html; charset=utf-8, body: cache.html
+
+No 200 with empty body (intentional divergence from upstream; see
+learnings.md for the rationale table).
+
+## Build (PASS)
+
+$ cd /home/kexi/web-mail/worker && npm run build
+> wrangler deploy --dry-run
+⛅️ wrangler 4.93.0
+Total Upload: 12.16 KiB / gzip: 3.95 KiB
+--dry-run: exiting now.

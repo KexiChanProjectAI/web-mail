@@ -1,0 +1,263 @@
+F4 — Scope-Fidelity Review (worker-owns-telegram-delivery)
+Reviewer: F4 (independent scope-fidelity gate)
+Date: 2026-07-04
+Plan: .omo/plans/worker-owns-telegram-delivery.md
+Notepad: .omo/notepads/worker-owns-telegram-delivery/{learnings.md,issues.md}
+Mode: READ-ONLY review. No code edits performed. Direct file inspection
+of every boundary, no reliance on subagent claims.
+
+================================================================================
+CHECKLIST (every "Must NOT have" item from the plan)
+================================================================================
+
+[1] No Go fallback Telegram sender after removal
+    EVIDENCE:
+    - Directory /home/kexi/web-mail/internal/telegram/ EXISTS but is empty
+      (only `.` and `..`); no .go files. Confirmed via
+      `ls -la /home/kexi/web-mail/internal/telegram/` → total 8 (2 entries).
+      `find … -type f` returns nothing. The directory is a no-op stub,
+      not a Go package.
+    - `go build ./...` → exit 0 clean.
+    - `grep -rn "NewDeliveryService|telegramService|DeliveryService" .`
+      → ZERO matches in any .go file. The only matches are in
+      `.omo/notepads/.../learnings.md` (task 5 retrospective describing
+      what was REMOVED) and `.omo/plans/worker-owns-telegram-delivery.md`
+      (the plan itself, referencing what must not exist).
+    - `internal/server/server.go:43-67` — `New()` now constructs
+      `ingestHandler` with 3 args only:
+      `ingest.NewIngestHandler(db, store, cfg)`. No `telegramService`
+      parameter, no `if cfg.TelegramBotToken != ""` block, no tgClient
+      construction.
+    - `internal/ingest/handler.go:28-37` — `IngestHandler` struct has
+      exactly 3 fields (db, storage, config). `NewIngestHandler` has
+      exactly 3 parameters. No `telegramService` field, no
+      `*telegram.DeliveryService` import. Imports limited to
+      `config`, `middleware`, `storage`.
+    VERDICT: PASS
+
+[2] No Go-side Telegram audit callback API
+    EVIDENCE:
+    - `internal/db/telegram.go` is deleted. `internal/db/models.go` is
+      a 1-line `package db` file with no `TelegramDelivery` struct.
+    - `internal/server/share.go` is deleted. No `ShareHandler` / `ServeHTML`
+      / `ServeTXT` types.
+    - `grep -nE "CreateOrUpdateDelivery|GetDeliveryStatus|TelegramDelivery|
+      /share/\{token\}|NewShareHandler|ShareHandler|shareHandler" --include=*.go .`
+      → exactly ONE match: `internal/server/server.go:106` which is the
+      plan-mandated retirement comment
+      ("// Go share handler, db.CreateShareToken / FindMessageIDByToken
+      helpers, share_tokens table, and Telegram delivery table have all
+      been removed (see migration 003_drop_share_and_delivery_tables)...").
+      This is a comment, not live code.
+    - The audit helpers are referenced ONLY in the down-migration
+      (`003_drop_share_and_delivery_tables.down.sql` recreates the
+      tables verbatim) — that is the rollback surface, not a
+      callback API.
+    VERDICT: PASS
+
+[3] Raw MIME ingest contract is unchanged (no parsed-JSON ingest rewrite)
+    EVIDENCE:
+    - `internal/ingest/handler.go:67-71` — handler reads raw bytes:
+      `raw, err := io.ReadAll(io.LimitReader(r.Body, limit+1))`
+    - `internal/ingest/handler.go:117-119` — saves raw MIME as-is:
+      `h.storage.SaveRawMIME(contentHash, raw)` and
+      `rawPath := fmt.Sprintf("raw/%s", parsed.ContentHash)` (line 160).
+    - `internal/ingest/handler.go:122-134` — persist path uses
+      `parsed *ParsedMessage` from `ParseMIME(raw)` (Go-internal parser),
+      not any JSON-shaped ingest.
+    - Worker side: `worker/src/index.ts:299-307` — POSTs raw bytes:
+        `fetch(url, { method: "POST",
+          headers: { "Content-Type": "message/rfc822",
+                     "X-Lite-Mail-Ingest-PSK": psk },
+          body })`
+      with `body: body` (the `ArrayBuffer` from `collectStream`). The
+      bytes posted are the bytes collected from `message.raw`, not a
+      parsed-JSON object. The 16 existing ingest tests in
+      `worker/test/index.test.ts` (all still passing) lock this contract
+      bit-for-bit.
+    - No new `Content-Type: application/json` ingest path added in
+      `internal/ingest/`. The Go handler still rejects anything that
+      doesn't match the PSK-authenticated raw MIME flow.
+    VERDICT: PASS
+
+[4] No upstream callback_query, webhook, TMA, blocklist, summary-AI,
+    or command features were imported
+    EVIDENCE:
+    - Worker source tree, `grep "callback_data|callback_query|webhook|/
+      tma|TMA|blocklist|summary|renderEmailSummaryMode|summarization|
+      openai|workers-ai"`:
+        * `callback_data` appears ONLY in
+          - `worker/src/mail/render.ts:20` — comment in docstring
+            ("No `callback_data` anywhere in the serialized markup.")
+          - `worker/src/telegram/api.ts:9` — comment rejecting it
+            ("any of the callback / TMA / webhook product surface")
+          - `worker/test/telegram.test.ts:22, 30, 342, 348` — test
+            assertion that the serialized markup CONTAINS NO
+            `callback_data` (the test enforces absence).
+          - `worker/src/handler/fetch/index.ts:12-16` — comment
+            documenting what is deliberately NOT included.
+        No live `callback_data` STRING emitted anywhere in the
+        rendered markup. The test at line 348
+        (`expect(serialized).not.toContain("callback_data")`)
+        passes, proving the bound is real.
+    - `reply_markup` appears in:
+        * `worker/src/mail/render.ts:33, 57, 75` — the only fields in
+          the inline keyboard are `text` and `url` (URL buttons), no
+          `callback_data`. See `render.ts:58-69` — produces exactly
+          two URL buttons: "View as TXT" and "View as HTML".
+        * `worker/src/telegram/api.ts:19` — type declaration accepting
+          `reply_markup?: unknown` for the request body (generic
+          Telegram field; not used for callbacks).
+    - `webhook` / `/tma` / `TMA` — ZERO matches in `worker/src/*.ts`
+      live code; only in comments documenting what is excluded.
+    - `blocklist` — ZERO matches anywhere.
+    - `summary` / `summarization` — matches are all in:
+        * `worker/src/index.ts:54` — variable name (`sendTelegramForCache`
+          uses the word "summary" in a comment about the email summary
+          message body, not a feature flag).
+        * `worker/src/mail/render.ts:10, 14, 20, 48` — comments
+          describing what was deliberately NOT imported from upstream
+          (`renderEmailSummaryMode`, AI summary, etc.).
+        * `worker/src/mail/parse.ts:20` — comment in docstring.
+      No `summary.ts`, no `renderEmailSummaryMode`, no
+      `renderEmailListMode` import.
+    - No `command` / `cmd` / `init` route in the Worker fetch handler.
+      `worker/src/handler/fetch/index.ts:38-81` registers exactly
+      one route: `router.get("/email/:id", ...)` plus a `*` 404
+      catch-all. NO `/`, `/init`, `/tma`, `/api/*`, `/telegram/:token/webhook`.
+    - No Go-side Telegram audit row insertion. The migrations drop
+      `telegram_deliveries` (`003_*.up.sql:13`) so the audit table is
+      GONE; there is no callback API to write rows into even if one
+      were reintroduced.
+    VERDICT: PASS
+
+[5] Old /share/{token} links are intentionally retired, not
+    preserved/redirected
+    EVIDENCE:
+    - `internal/server/server.go:103-110` — explicit retirement comment:
+        "// Note: the public /share/{token} preview routes were
+        //  intentionally retired in favor of the Cloudflare Worker,
+        //  which now hosts /email/:id?mode=text|html as the canonical
+        //  preview surface. The Go share handler, db.CreateShareToken /
+        //  FindMessageIDByToken helpers, share_tokens table, and
+        //  Telegram delivery table have all been removed (see migration
+        //  003_drop_share_and_delivery_tables). Any previously-issued
+        //  /share/{token} URLs will return 404 from the SPA catch-all
+        //  below; new previews are minted by the Worker."
+    - `internal/server/server.go:111-114` — no `/share/{token}` route
+      registration. Only `r.Get("/", spaHandler)`, `r.Get("/login", ...)`,
+      `r.Get("/messages/{id}", ...)`, and the static file handler.
+    - Worker `test/fetch.test.ts:199` — test case
+      `"/share/abc" returns 404` (passing) explicitly verifies the
+      retired URL returns 404 from the Worker's fetch handler.
+    - `worker/src/handler/fetch/index.ts:74-81` — `*` catch-all returns
+      404. Combined with no upstream route for `/share/...`, the path
+      consistently returns 404.
+    - README.md:50-51 — operator-facing docs: "Old Go `/share/{token}`
+      links are intentionally retired. ... previously-issued
+      `/share/{token}` URLs will return 404 from the SPA catch-all."
+    - No `http.Redirect` or rewrite rule that would 30x redirect
+      `/share/{token}` → `/email/:id`. Verified by absence of any
+      `Redirect` / `StatusMovedPermanently` / `Route` config for the
+      share path.
+    - The new Worker preview is the canonical replacement at
+      `/email/:id?mode=text|html` (TTL-bound, not permanent — this
+      is documented and intentional, NOT a re-implementation of the
+      share token).
+    VERDICT: PASS
+
+[6] KV binding name is `DB` (upstream-style), not a renamed binding
+    EVIDENCE:
+    - `worker/src/types/index.ts:34` — `DB: KVNamespace;` declared in
+      `Env` interface (no `?`, non-optional, exactly upstream name).
+    - `worker/wrangler.toml:40` — `binding = "DB"` (commented in the
+      template, but the literal string is the upstream pin).
+    - `worker/wrangler.toml:32` — explanatory comment:
+      "fails at deploy time with `DB: KVNamespace` not satisfied."
+    - `worker/README.md:111, 136` — operator docs: "The binding name
+      MUST be `DB` (pinned by the upstream contract; renaming requires
+      forking the Worker code)."
+    - All test fixtures use `DB`:
+        * `worker/test/integration.test.ts:173` — `DB: kv as unknown as KVNamespace`
+        * `worker/test/fetch.test.ts:76` — `DB: createMockKV() as unknown as KVNamespace`
+        * `worker/test/contract.test.ts:25` — `DB: {} as KVNamespace`
+        * `worker/test/index.test.ts:78, 84` — local test `Env` interface
+          has `DB: KVNamespace;` field; `createMockEnv` seeds `DB: {}`.
+    - No alternative binding name (`MAIL_CACHE`, `PREVIEW_DB`,
+      `WORKER_KV`, etc.) is introduced anywhere in `worker/`.
+    - `grep -rn "binding" worker/wrangler.toml` returns only the
+      single `binding = "DB"` occurrence.
+    VERDICT: PASS
+
+[7] No new feature flag or callback API added in task 8
+    EVIDENCE:
+    - `Makefile` (the entire task 8 surface) — targets are:
+        * `all` (unchanged): vet build test
+        * `build-worker`: `cd worker && npm run build` (one-line)
+        * `test-integration`, `test-worker`, `vet`, `clean`,
+          `db-setup` (pre-existing, unchanged)
+        * `verify` (NEW): 4-gate sequential check using
+          `&&` short-circuiting. No env-var toggle, no
+          `[features]` block, no `BUILD_TAGS`, no
+          `-tags=...` flag.
+    - No new files added under `internal/`, `worker/src/`, or
+      `worker/test/` in task 8. Only:
+        * `Makefile` (added verify + build-worker targets)
+        * `README.md` (added "Migration cutover" section)
+        * `worker/README.md` (added "Cutover checklist" section)
+    - Worker runtime code from task 4 is unchanged. The opt-in
+      behavior (`TELEGRAM_TOKEN` empty → skip Telegram send branch)
+      is the existing `sendTelegramForCache` early-return at
+      `worker/src/index.ts:63-68`:
+        ```
+        if (!token || !ids) {
+          // Opt-in: missing token or ids means Telegram is disabled.
+          return;
+        }
+        ```
+      This is NOT a new feature flag; it is the existing
+      opt-in contract.
+    - `grep "featureFlag|feature flag|fallback sender"` — all
+      matches are in plan/learnings files describing the
+      FORBIDDEN surface, not in any code.
+    - No callback API added. The Worker has no `/callback`,
+      `/webhook`, `/telegram/...` route. Only
+      `GET /email/:id?mode=text|html` and a 404 catch-all.
+    VERDICT: PASS
+
+================================================================================
+VERIFICATION GATES (re-run independently for this review)
+================================================================================
+
+- `go vet ./...`           → exit 0, clean
+- `go build ./...`         → exit 0, clean
+- `go test -count=1 ./...` → 10 packages OK, 0 failures
+                             (api, auth, config, db, ingest, middleware,
+                             server, storage, tests/integration —
+                             plus cmd/server, testutil with no tests)
+- `cd worker && npm test`  → 60/60 across 5 files
+                             (contract 8, fetch 10, telegram 16,
+                             index 16, integration 10)
+- `cd worker && npm run build` → wrangler 4.93.0, dry-run OK,
+                             428.60 KiB / 121.40 KiB gzipped,
+                             "No bindings found" (template state;
+                             DB binding is commented per plan).
+
+================================================================================
+SUMMARY
+================================================================================
+
+All 7 must-NOT-have boundaries are satisfied. The plan-mandated
+retirement comment in `internal/server/server.go:103-110` is the
+only `.go`-file match for the otherwise-removed symbols and is
+explicitly required by the plan (operator-facing documentation,
+not live code).
+
+The "Worker uses upstream-style `DB` binding" and "Worker preview
+route is `/email/:id?mode=text|html`" inherited-wisdom items are
+both confirmed by direct file inspection. The old `/share/{token}`
+retirement is real (no 30x redirect, no preservation), and the
+Telegram send is opt-in via env-var absence rather than a new
+feature flag.
+
+VERDICT: APPROVE
