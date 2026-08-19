@@ -4,7 +4,7 @@
 
 The Cloudflare Email Worker is the front door for inbound mail. It receives email via Cloudflare Email Routing, forwards the raw MIME to the Go service for durable storage, parses the email locally for preview/Telegram purposes, and dispatches a Telegram notification with `View as TXT` / `View as HTML` buttons that point to Worker-hosted preview links.
 
-**Architecture**: Email → Cloudflare Email Worker → (1) raw MIME POST → Go Service Ingest Endpoint, (2) local parse → KV preview cache → Telegram `sendMessage` with buttons.
+**Architecture**: Email → Cloudflare Email Worker → two independent paths in parallel: (1) raw MIME POST → Go Service Ingest Endpoint, (2) local parse → KV preview cache → Telegram `sendMessage` with buttons. Either path failing does not skip the other.
 
 This Worker owns Telegram delivery and the public preview-link surface. The Go server is intentionally unaware of Telegram.
 
@@ -158,7 +158,7 @@ This runs `go vet ./...`, `go test ./...`, `cd worker && npm test`, and `cd work
    npx wrangler secret put TELEGRAM_ID
    ```
 
-   The Worker's `email()` now sees both env vars set, so each accepted ingest writes the `EmailCache` to the `DB` KV namespace and dispatches a Telegram `sendMessage` to every chat id in `TELEGRAM_ID`.
+   The Worker's `email()` now sees both env vars set, so each inbound email writes the `EmailCache` to the `DB` KV namespace and dispatches a Telegram `sendMessage` to every chat id in `TELEGRAM_ID`, in parallel with the Go ingest POST. Ingest failure does not skip Telegram; Telegram failure does not skip ingest.
 
 5. **Verify preview URLs and Telegram messages.**
 
@@ -251,15 +251,16 @@ npm test
 Tests use Vitest in single-run mode (`vitest run`). The test suite covers:
 - Email handler invocation
 - Raw MIME stream reading
-- Local parse → preview cache write → Telegram POST pipeline
-- POST to ingest endpoint with correct headers
-- Authentication failure handling (401)
-- Message size limit handling (413)
+- Local parse → preview cache write → Telegram POST pipeline (independent of Go ingest)
+- POST to ingest endpoint with correct headers (independent of Telegram)
+- Authentication failure handling (401) — still sends Telegram, then `setReject`
+- Message size limit handling (413) — still sends Telegram, then `setReject`
 - Worker misconfiguration detection (missing env vars)
 - Stream reading failures
 - `GET /email/:id?mode=text|html` preview retrieval (404 on missing/expired)
-- Telegram send failure does not call `message.setReject(...)`
-- Duplicate ingest response from Go does NOT write a cache entry and does NOT send Telegram
+- Telegram send failure does not call `message.setReject(...)` and does not skip ingest
+- Duplicate ingest response from Go does not skip KV write or Telegram
+- Same Message-ID retried after ingest reject does not re-send Telegram
 
 ### Run Locally
 
@@ -325,26 +326,26 @@ Note: `INGEST_URL`, `WORKER_INGEST_PSK`, `TELEGRAM_TOKEN`, and `TELEGRAM_ID` mus
 2. The Worker `email()` handler is invoked with a `ForwardableEmailMessage`
 3. The raw MIME stream is consumed via `collectStream()` helper into a `Uint8Array`
 4. The Worker parses the email locally with `postal-mime` + `html-to-text` to produce an `EmailCache` (id, from, to, subject, text, html) for preview + Telegram
-5. A POST is made to the Go ingest endpoint with:
-   - `Content-Type: message/rfc822`
-   - `X-Lite-Mail-Ingest-PSK: <psk>`
-   - Raw MIME as body
-6. The Worker waits for the ingest POST to complete before acknowledging the email event
-7. If the Go response is `{"status":"accepted"}` (or an unparseable-but-2xx), the Worker writes the `EmailCache` to the `DB` KV namespace with `expirationTtl = MAIL_TTL`, then dispatches a Telegram `sendMessage` to every chat id in `TELEGRAM_ID` with the rendered summary and two inline URL buttons (`View as TXT`, `View as HTML`) pointing to `https://<DOMAIN>/email/<id>?mode=text|html`
-8. If the Go response is `{"status":"duplicate"}`, the Worker does NOT write a cache entry and does NOT send Telegram
-9. The Worker only calls `message.setReject(...)` when ingest itself failed (auth 401, size 413, network, timeout, 5xx after retry). Telegram or cache write failures after accepted ingest are logged and swallowed — the email is already durably stored in Go
+5. Two independent paths start in parallel:
+   - **Go ingest**: POST to the Go ingest endpoint with `Content-Type: message/rfc822`, `X-Lite-Mail-Ingest-PSK: <psk>`, and the raw MIME body
+   - **Preview + Telegram**: write the `EmailCache` to the `DB` KV namespace with `expirationTtl = MAIL_TTL`, then dispatch a Telegram `sendMessage` to every chat id in `TELEGRAM_ID` with the rendered summary and two inline URL buttons (`View as TXT`, `View as HTML`) pointing to `https://<DOMAIN>/email/<id>?mode=text|html`
+6. The Worker waits for **both** paths to settle before returning from `email()`
+7. Go ingest outcome (accepted / duplicate / 4xx / 5xx / network) does not skip preview/Telegram. Telegram/cache outcome does not skip ingest.
+8. Duplicate ingest (`{"status":"duplicate"}`) is a no-op on the Go side (no `setReject`) and does not skip Telegram. Retransmits of the same Message-ID skip Telegram via a KV `tg-sent:` marker so Cloudflare retries after an ingest reject do not double-notify.
+9. The Worker only calls `message.setReject(...)` when ingest itself failed (missing ingest env, auth 401, size 413, network, timeout, 5xx after retry). That bounce is ingest's retry signal. Telegram or cache write failures are logged and swallowed and never `setReject`.
 
 ### Error Handling
 
-- **Missing env vars** (`INGEST_URL` or `WORKER_INGEST_PSK`): Calls `message.setReject()` to reject the email
-- **Stream read failure**: Logs error and rejects
+- **Missing ingest env vars** (`INGEST_URL` or `WORKER_INGEST_PSK`): Telegram/preview still run; then `message.setReject()` so the sender retries once ingest is configured
+- **Missing Telegram env vars** (`TELEGRAM_TOKEN` or `TELEGRAM_ID`): Telegram send is skipped; Go ingest still runs
+- **Stream read failure**: Logs error and rejects (neither path can run)
 - **Local parse failure**: Synthesizes a minimal cache (`id` from `crypto.randomUUID()`, fallback subject/text) so the cache write + Telegram send still happen. Go still receives the full raw MIME. The `postal-mime` library is lenient and usually returns an empty object rather than throwing; this catch is a belt-and-suspenders guard
-- **401 from ingest**: Logs authentication failure and rejects the email
-- **413 from ingest**: Logs message size error and rejects the email
-- **Other non-OK status from ingest**: Logs error and rejects the email (single retry on 5xx)
-- **Fetch timeout**: 30 second timeout on the POST request
-- **KV cache write failure after accepted ingest**: Logged and swallowed. The email is already in Go; the preview link will be missing but storage is intact
-- **Telegram send failure after accepted ingest**: Logged per chat and swallowed. The loop continues to the next chat id; one bad chat id never blocks delivery to the others
+- **401 from ingest**: Logs authentication failure, Telegram still sent, then rejects the email
+- **413 from ingest**: Logs message size error, Telegram still sent, then rejects the email
+- **Other non-OK status from ingest**: Logs error, Telegram still sent, then rejects the email (single retry on 5xx)
+- **Fetch timeout**: 30 second timeout on the ingest POST request
+- **KV cache write failure**: Logged and swallowed. Telegram send is still attempted; Go ingest is unaffected
+- **Telegram send failure**: Logged per chat and swallowed. The loop continues to the next chat id; one bad chat id never blocks delivery to the others. Go ingest is unaffected
 - **Fetch timeout (preview route)**: None — preview reads are bounded by KV read latency
 
 ### ReadableStream Collection

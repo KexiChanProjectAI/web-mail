@@ -51,14 +51,37 @@ function streamFromBytes(bytes: Uint8Array): ReadableStream<Uint8Array> {
 }
 
 /**
- * Send the parsed email summary to every chat id in
- * `TELEGRAM_ID` (comma-separated). Failures are logged and swallowed
- * — the email has already been accepted by Go, so we MUST NOT call
- * `message.setReject(...)`.
+ * Preview + Telegram path. Independent of Go ingest: failures here are
+ * logged and swallowed and MUST NOT call `message.setReject(...)`.
+ *
+ * Retransmits of the same message (Cloudflare retry after an ingest
+ * reject) are suppressed via a KV marker keyed by Message-ID, or by
+ * SHA-256 of the raw MIME when no stable Message-ID is present.
  */
+const TG_SENT_KEY_PREFIX = "tg-sent:";
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+	const digest = await crypto.subtle.digest("SHA-256", bytes);
+	return [...new Uint8Array(digest)]
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("");
+}
+
+async function telegramSentKey(
+	cache: EmailCache,
+	raw: Uint8Array,
+): Promise<string> {
+	const id = cache.messageId.trim();
+	if (id.length > 0 && id !== cache.id && id !== "unknown") {
+		return `${TG_SENT_KEY_PREFIX}${id}`;
+	}
+	return `${TG_SENT_KEY_PREFIX}sha256:${await sha256Hex(raw)}`;
+}
+
 async function sendTelegramForCache(
 	cache: EmailCache,
 	env: Env,
+	raw: Uint8Array,
 ): Promise<void> {
 	const token = env.TELEGRAM_TOKEN;
 	const ids = env.TELEGRAM_ID;
@@ -66,8 +89,27 @@ async function sendTelegramForCache(
 		// Opt-in: missing token or ids means Telegram is disabled.
 		return;
 	}
+
+	const sentKey = await telegramSentKey(cache, raw);
+	try {
+		if (await env.DB.get(sentKey)) {
+			console.log("Telegram already delivered for this message, skipping:", {
+				sentKey,
+				cacheId: cache.id,
+			});
+			return;
+		}
+	} catch (err) {
+		console.error("Telegram dedup lookup failed; sending anyway:", {
+			sentKey,
+			cacheId: cache.id,
+			error: err instanceof Error ? err.message : String(err),
+		});
+	}
+
 	const api = createTelegramBotAPI(token);
 	const rendered = await renderEmail(cache, env);
+	let anyOk = false;
 	for (const rawId of ids.split(",")) {
 		const chatId = rawId.trim();
 		if (!chatId) continue;
@@ -79,14 +121,29 @@ async function sendTelegramForCache(
 				reply_markup: rendered.reply_markup,
 				link_preview_options: rendered.link_preview_options,
 			});
+			anyOk = true;
 		} catch (err) {
 			console.error("Telegram send failed:", {
 				chatId,
 				cacheId: cache.id,
 				error: err instanceof Error ? err.message : String(err),
 			});
-			// Do NOT rethrow — the email was already accepted by Go.
 		}
+	}
+
+	if (!anyOk) {
+		return;
+	}
+	try {
+		await env.DB.put(sentKey, cache.id, {
+			expirationTtl: getDefaultMailTtl(env),
+		});
+	} catch (err) {
+		console.error("Telegram dedup marker write failed:", {
+			sentKey,
+			cacheId: cache.id,
+			error: err instanceof Error ? err.message : String(err),
+		});
 	}
 }
 
@@ -144,14 +201,91 @@ async function collectStream(stream: ReadableStream): Promise<Uint8Array> {
 	return result;
 }
 
-async function email(
-	message: ForwardableEmailMessage,
+/**
+ * Worker-owned preview + Telegram. Never throws; never rejects the
+ * inbound message. Independent of the Go ingest outcome.
+ */
+async function deliverPreviewAndTelegram(
+	cache: EmailCache,
 	env: Env,
-	ctx: ExecutionContext,
+	raw: Uint8Array,
+	meta: IngestMeta,
+): Promise<void> {
+	try {
+		const dao = new Dao(env.DB);
+		const ttl = getDefaultMailTtl(env);
+		await dao.saveMailCache(cache.id, cache, ttl);
+		console.log("Preview cache written:", { ...meta, cacheId: cache.id });
+	} catch (err) {
+		console.error("Preview cache write failed:", {
+			...meta,
+			cacheId: cache.id,
+			error: err instanceof Error ? err.message : String(err),
+		});
+	}
+
+	try {
+		await sendTelegramForCache(cache, env, raw);
+	} catch (err) {
+		console.error("Telegram dispatch failed unexpectedly:", {
+			...meta,
+			cacheId: cache.id,
+			error: err instanceof Error ? err.message : String(err),
+		});
+	}
+}
+
+/**
+ * Durable ingest into Go. Throws `RejectableDeliveryError` so the
+ * caller can `setReject` — that bounce is ingest's own retry signal
+ * and does not gate Telegram (already started in parallel).
+ */
+async function deliverToGo(
+	rawMIME: Uint8Array,
+	env: Env,
+	meta: IngestMeta,
 ): Promise<void> {
 	const ingestUrl = env.INGEST_URL;
 	const ingestPSK = env.WORKER_INGEST_PSK;
-	const meta = buildIngestMeta(message, ingestUrl);
+	if (!ingestUrl || !ingestPSK) {
+		console.error("Missing required environment configuration:", {
+			...meta,
+			hasIngestUrl: !!ingestUrl,
+			hasIngestPSK: !!ingestPSK,
+		});
+		throw new RejectableDeliveryError(
+			"Worker misconfigured",
+			"Worker misconfigured: missing ingest URL or PSK",
+		);
+	}
+
+	console.log("Delivering email to ingest endpoint:", meta);
+	const ingestStatus = await postToIngestWithStatus(
+		ingestUrl,
+		ingestPSK,
+		rawMIME.buffer as ArrayBuffer,
+		meta,
+	);
+
+	if (ingestStatus === "duplicate") {
+		console.log("Duplicate email ignored:", meta);
+		return;
+	}
+
+	if (ingestStatus !== "accepted") {
+		console.warn(
+			"Ingest response was not a recognized status; treating as accepted:",
+			meta,
+		);
+	}
+}
+
+async function email(
+	message: ForwardableEmailMessage,
+	env: Env,
+	_ctx: ExecutionContext,
+): Promise<void> {
+	const meta = buildIngestMeta(message, env.INGEST_URL);
 
 	console.log("Email event received:", meta);
 
@@ -168,19 +302,8 @@ async function email(
 		return;
 	}
 
-	if (!ingestUrl || !ingestPSK) {
-		console.error("Missing required environment configuration:", {
-			...meta,
-			hasIngestUrl: !!ingestUrl,
-			hasIngestPSK: !!ingestPSK,
-		});
-		message.setReject("Worker misconfigured: missing ingest URL or PSK");
-		return;
-	}
-
 	// Parse locally (best-effort) for the preview cache + Telegram render.
-	// A parse failure does NOT block the raw-MIME ingest — Go remains the
-	// source of truth and will still receive the full message body.
+	// A parse failure does NOT block either delivery path.
 	let cache: EmailCache;
 	try {
 		const messageForParse: ParseInput = {
@@ -196,10 +319,6 @@ async function email(
 			resolveMaxEmailSizePolicy(env),
 		);
 	} catch (err) {
-		// parseEmail itself is defensive (postal-mime is lenient and
-		// parse.ts catches throws), so this catch is a belt-and-suspenders
-		// guard. We synthesize a minimal cache so cache write + Telegram
-		// still have something to operate on.
 		console.error("Local parse failed unexpectedly:", err);
 		cache = {
 			id: crypto.randomUUID(),
@@ -212,72 +331,22 @@ async function email(
 		};
 	}
 
-	console.log("Delivering email to ingest endpoint:", meta);
-
-	let ingestStatus: "accepted" | "duplicate" | null = null;
-	try {
-		const response = await postToIngestWithStatus(
-			ingestUrl,
-			ingestPSK,
-			rawMIME.buffer as ArrayBuffer,
-			meta,
-		);
-		ingestStatus = response;
-	} catch (err) {
-		const reason =
+	// Both paths start immediately. Ingest failure still setRejects so
+	// Cloudflare retries durable storage; Telegram does not wait for Go
+	// and Go does not wait for Telegram.
+	const previewP = deliverPreviewAndTelegram(cache, env, rawMIME, meta);
+	const ingestP = deliverToGo(rawMIME, env, meta).then(
+		() => null as string | null,
+		(err: unknown) =>
 			err instanceof RejectableDeliveryError
 				? err.reason
-				: "Mail delivery failed: unexpected error";
-		console.error("Email delivery failed:", { ...meta, reason });
-		message.setReject(reason);
-		return;
-	}
+				: "Mail delivery failed: unexpected error",
+	);
 
-	if (ingestStatus === "duplicate") {
-		console.log("Duplicate email ignored:", meta);
-		// Per task 4 contract: no cache write, no Telegram send.
-		return;
-	}
-
-	if (ingestStatus !== "accepted") {
-		// Defensive: postToIngestWithStatus returns null only for
-		// ambiguous "ok but unparseable JSON" responses. Treat them
-		// as accepted (parity with previous behavior) so a transient
-		// Go response shape change cannot drop Telegram delivery.
-		console.warn(
-			"Ingest response was not a recognized status; treating as accepted:",
-			meta,
-		);
-	}
-
-	// Accepted (or unparseable-but-ok) path: write preview cache and
-	// send Telegram. Both are best-effort — failures are logged and
-	// swallowed; we MUST NOT call message.setReject() because the
-	// email is already durably stored in Go.
-	try {
-		const dao = new Dao(env.DB);
-		const ttl = getDefaultMailTtl(env);
-		await dao.saveMailCache(cache.id, cache, ttl);
-		console.log("Preview cache written:", { ...meta, cacheId: cache.id });
-	} catch (err) {
-		console.error("Preview cache write failed:", {
-			...meta,
-			cacheId: cache.id,
-			error: err instanceof Error ? err.message : String(err),
-		});
-	}
-
-	try {
-		await sendTelegramForCache(cache, env);
-	} catch (err) {
-		// sendTelegramForCache already swallows per-chat failures and
-		// logs them. This outer catch is a final safety net for
-		// renderEmail or other unexpected errors.
-		console.error("Telegram dispatch failed unexpectedly:", {
-			...meta,
-			cacheId: cache.id,
-			error: err instanceof Error ? err.message : String(err),
-		});
+	const [, ingestReject] = await Promise.all([previewP, ingestP]);
+	if (ingestReject) {
+		console.error("Email delivery failed:", { ...meta, reason: ingestReject });
+		message.setReject(ingestReject);
 	}
 }
 

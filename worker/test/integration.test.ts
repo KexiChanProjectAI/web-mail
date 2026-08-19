@@ -6,19 +6,21 @@ import type {
 import type { Env } from "../src/types";
 
 // ---------------------------------------------------------------------------
-// Task 4 — Worker email-flow integration.
+// Worker email-flow integration.
 //
 // End-to-end test of the `email()` flow. Required behavior:
 //
-//   (1) accepted ingest path → one Go POST, one KV write, one Telegram request
-//   (2) duplicate ingest       → no KV write, no Telegram request
-//   (3) ingest 401 / 413 / 5xx → no KV write, no Telegram request, setReject
-//   (4) parse failure          → still POSTs raw MIME; if Go accepts, accepts
-//   (5) Telegram send failure  → no setReject; KV still written
+//   (1) happy path              → one Go POST, one KV cache write, Telegram
+//                                 per chat_id (plus a tg-sent dedup marker)
+//   (2) duplicate ingest        → Go POST happens; KV + Telegram still run
+//   (3) ingest 401 / 413 / 5xx  → KV + Telegram still run; setReject called
+//   (4) parse failure           → still POSTs raw MIME; KV + Telegram still run
+//   (5) Telegram send failure   → no setReject; ingest + KV still happen
+//   (6) same Message-ID retry   → Telegram sent once (KV dedup)
 //
-// These tests must FAIL before the integration is wired and PASS once
-// `email()` parses locally, then ingests, then only on `status: accepted`
-// saves the cache and sends Telegram.
+// Go ingest and Telegram are independent: either path failing does not
+// skip the other. `setReject` is ingest-only so Cloudflare can retry
+// durable storage; Telegram never setRejects.
 // ---------------------------------------------------------------------------
 
 // We mock the global `fetch` so we can both
@@ -192,6 +194,47 @@ const findTelegramCalls = () => {
 	) as Array<[string, RequestInit]>;
 };
 
+const findGoCalls = () => {
+	return mockFetch.mock.calls.filter(([url]) =>
+		String(url).startsWith("https://mail.example.com/api/ingest"),
+	) as Array<[string, RequestInit]>;
+};
+
+function stubFetch(
+	handlers: {
+		ingest?: (call: number) => Promise<Response>;
+		telegram?: () => Promise<Response>;
+	} = {},
+): void {
+	let ingestCalls = 0;
+	mockFetch.mockImplementation((url: string) => {
+		const href = String(url);
+		if (href.startsWith("https://mail.example.com/api/ingest")) {
+			ingestCalls += 1;
+			if (handlers.ingest) return handlers.ingest(ingestCalls);
+			return Promise.resolve(
+				new Response(
+					JSON.stringify({ status: "accepted", message_id: 1 }),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+			);
+		}
+		if (href.startsWith("https://api.telegram.org/")) {
+			if (handlers.telegram) return handlers.telegram();
+			return Promise.resolve(
+				new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				}),
+			);
+		}
+		return Promise.reject(new Error(`unexpected fetch: ${href}`));
+	});
+}
+
+const cachePutsOf = (kv: ReturnType<typeof createMockKV>) =>
+	kv.__puts.filter((p) => !p.key.startsWith("tg-sent:"));
+
 // ---------------------------------------------------------------------------
 // Test cases
 // ---------------------------------------------------------------------------
@@ -249,16 +292,17 @@ describe("email() flow — task 4 integration", () => {
 				],
 			).toBe("psk-secret");
 
-			// (b) exactly one KV put, key = cache.id, TTL = MAIL_TTL=86400
-			expect(kv.__puts).toHaveLength(1);
-			const put = kv.__puts[0];
+			// (b) one KV cache write, key = cache.id, TTL = MAIL_TTL=86400
+			const cachePuts = cachePutsOf(kv);
+			expect(cachePuts).toHaveLength(1);
+			const put = cachePuts[0];
 			expect(put.options).toEqual({ expirationTtl: 86400 });
 			const stored = JSON.parse(put.value);
 			expect(stored.id).toBe(put.key);
 			expect(stored.from).toBe("sender@example.com");
 			expect(stored.to).toBe("rcpt@example.com");
 			expect(stored.text).toContain("Hello from the integration test.");
-
+			expect(kv.__puts.some((p) => p.key.startsWith("tg-sent:"))).toBe(true);
 			// (c) one Telegram POST per chat_id (TELEGRAM_ID = "111,222" → 2)
 			const telegramCalls = findTelegramCalls();
 			expect(telegramCalls).toHaveLength(2);
@@ -303,88 +347,142 @@ describe("email() flow — task 4 integration", () => {
 	});
 
 	describe("duplicate ingest", () => {
-		it("(2) no KV write, no Telegram request, no setReject", async () => {
+		it("(2) KV write + Telegram still happen, no setReject", async () => {
 			const { email } = await import("../src/index");
 			const env = createMockEnv();
 			const kv = env.DB as unknown as ReturnType<typeof createMockKV>;
 			const message = createMockMessage();
 			const ctx = createMockContext();
 
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ status: "duplicate" }), {
-					status: 200,
-					headers: { "content-type": "application/json" },
-				}),
-			);
+			stubFetch({
+				ingest: () =>
+					Promise.resolve(
+						new Response(JSON.stringify({ status: "duplicate" }), {
+							status: 200,
+							headers: { "content-type": "application/json" },
+						}),
+					),
+			});
 
 			await email(message, env, ctx);
 
-			// exactly one Go POST (the duplicate detection call)
 			expect(findGoCall()).toBeDefined();
-			expect(findTelegramCalls()).toHaveLength(0);
-			expect(kv.__puts).toHaveLength(0);
+			expect(findTelegramCalls()).toHaveLength(2);
+			expect(cachePutsOf(kv)).toHaveLength(1);
 			expect(message.setReject).not.toHaveBeenCalled();
 		});
 	});
 
 	describe("ingest failure", () => {
-		it("(3a) 401 → no KV, no Telegram, setReject called", async () => {
+		it("(3a) 401 → KV + Telegram still happen, setReject called", async () => {
 			const { email } = await import("../src/index");
 			const env = createMockEnv();
 			const kv = env.DB as unknown as ReturnType<typeof createMockKV>;
 			const message = createMockMessage();
 			const ctx = createMockContext();
 
-			mockFetch.mockResolvedValueOnce(
-				new Response(null, { status: 401, statusText: "Unauthorized" }),
-			);
+			stubFetch({
+				ingest: () =>
+					Promise.resolve(
+						new Response(null, { status: 401, statusText: "Unauthorized" }),
+					),
+			});
 
 			await email(message, env, ctx);
 
-			expect(findTelegramCalls()).toHaveLength(0);
-			expect(kv.__puts).toHaveLength(0);
+			expect(findTelegramCalls()).toHaveLength(2);
+			expect(cachePutsOf(kv)).toHaveLength(1);
 			expect(message.setReject).toHaveBeenCalledWith(
 				expect.stringContaining("ingest authentication rejected"),
 			);
 		});
 
-		it("(3b) 413 → no KV, no Telegram, setReject called", async () => {
+		it("(3b) 413 → KV + Telegram still happen, setReject called", async () => {
 			const { email } = await import("../src/index");
 			const env = createMockEnv();
 			const kv = env.DB as unknown as ReturnType<typeof createMockKV>;
 			const message = createMockMessage();
 			const ctx = createMockContext();
 
-			mockFetch.mockResolvedValueOnce(
-				new Response(null, { status: 413, statusText: "Payload Too Large" }),
-			);
+			stubFetch({
+				ingest: () =>
+					Promise.resolve(
+						new Response(null, {
+							status: 413,
+							statusText: "Payload Too Large",
+						}),
+					),
+			});
 
 			await email(message, env, ctx);
 
-			expect(findTelegramCalls()).toHaveLength(0);
-			expect(kv.__puts).toHaveLength(0);
+			expect(findTelegramCalls()).toHaveLength(2);
+			expect(cachePutsOf(kv)).toHaveLength(1);
 			expect(message.setReject).toHaveBeenCalledWith(
 				expect.stringContaining("message exceeds ingest size limits"),
 			);
 		});
 
-		it("(3c) 5xx (after retry) → no KV, no Telegram, setReject called", async () => {
+		it("(3c) 5xx (after retry) → KV + Telegram still happen, setReject called", async () => {
 			const { email } = await import("../src/index");
 			const env = createMockEnv();
 			const kv = env.DB as unknown as ReturnType<typeof createMockKV>;
 			const message = createMockMessage();
 			const ctx = createMockContext();
 
-			mockFetch
-				.mockResolvedValueOnce(new Response(null, { status: 500 }))
-				.mockResolvedValueOnce(new Response(null, { status: 502 }));
+			stubFetch({
+				ingest: (call) =>
+					Promise.resolve(
+						new Response(null, { status: call === 1 ? 500 : 502 }),
+					),
+			});
 
 			await email(message, env, ctx);
 
-			expect(findTelegramCalls()).toHaveLength(0);
-			expect(kv.__puts).toHaveLength(0);
+			expect(findGoCalls()).toHaveLength(2);
+			expect(findTelegramCalls()).toHaveLength(2);
+			expect(cachePutsOf(kv)).toHaveLength(1);
 			expect(message.setReject).toHaveBeenCalledWith(
 				expect.stringContaining("ingest server returned status"),
+			);
+		});
+
+		it("(3d) network error → KV + Telegram still happen, setReject called", async () => {
+			const { email } = await import("../src/index");
+			const env = createMockEnv();
+			const kv = env.DB as unknown as ReturnType<typeof createMockKV>;
+			const message = createMockMessage();
+			const ctx = createMockContext();
+
+			stubFetch({
+				ingest: () => Promise.reject(new Error("Network connection failed")),
+			});
+
+			await email(message, env, ctx);
+
+			expect(findTelegramCalls()).toHaveLength(2);
+			expect(cachePutsOf(kv)).toHaveLength(1);
+			expect(message.setReject).toHaveBeenCalledWith(
+				"Mail delivery failed: Network connection failed",
+			);
+		});
+
+		it("(3e) missing ingest URL → no Go POST, Telegram still happens, setReject called", async () => {
+			const { email } = await import("../src/index");
+			const env = createMockEnv({ INGEST_URL: "" });
+			const kv = env.DB as unknown as ReturnType<typeof createMockKV>;
+			const message = createMockMessage();
+			const ctx = createMockContext();
+
+			stubFetch();
+
+			await email(message, env, ctx);
+
+			expect(findGoCall()).toBeUndefined();
+			expect(findTelegramCalls()).toHaveLength(2);
+			expect(cachePutsOf(kv)).toHaveLength(1);
+			expect(message.setReject).toHaveBeenCalledWith(
+				"Worker misconfigured: missing ingest URL or PSK",
 			);
 		});
 	});
@@ -432,8 +530,9 @@ describe("email() flow — task 4 integration", () => {
 			expect(bodyText).toBe(brokenRaw);
 
 			// (b) Cache was still written (parse fallback still produced text/html)
-			expect(kv.__puts).toHaveLength(1);
-			const stored = JSON.parse(kv.__puts[0].value);
+			const cachePuts = cachePutsOf(kv);
+			expect(cachePuts).toHaveLength(1);
+			const stored = JSON.parse(cachePuts[0].value);
 			expect(typeof stored.text).toBe("string");
 			expect(stored.text.length).toBeGreaterThan(0);
 
@@ -518,6 +617,27 @@ describe("email() flow — task 4 integration", () => {
 			expect(kv.__puts).toHaveLength(1);
 			expect(findTelegramCalls()).toHaveLength(0);
 			expect(message.setReject).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("independence: Telegram retry dedup", () => {
+		it("(6) second delivery of the same Message-ID does not re-send Telegram", async () => {
+			const { email } = await import("../src/index");
+			const env = createMockEnv();
+			const ctx = createMockContext();
+			const first = createMockMessage();
+			const second = createMockMessage();
+
+			stubFetch();
+
+			await email(first, env, ctx);
+			await email(second, env, ctx);
+
+			expect(findGoCalls()).toHaveLength(2);
+			// 2 chats on the first delivery only
+			expect(findTelegramCalls()).toHaveLength(2);
+			expect(first.setReject).not.toHaveBeenCalled();
+			expect(second.setReject).not.toHaveBeenCalled();
 		});
 	});
 });

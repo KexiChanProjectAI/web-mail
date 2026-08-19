@@ -44,6 +44,7 @@ The Worker:
 - Receives inbound email via Cloudflare Email Routing.
 - Forwards the raw MIME message to the Go server's `/api/ingest` endpoint using the existing `WORKER_INGEST_PSK` contract.
 - Parses the email locally, caches a preview record in its KV namespace, and dispatches a Telegram message with two inline URL buttons (`View as TXT`, `View as HTML`) that point to the Worker.
+- Runs ingest and Telegram **in parallel and independently**: Go being unreachable still notifies Telegram; Telegram being down still ingests into Go.
 
 **Preview URLs are TTL-bound, not permanent.** Each `/email/:id?mode=text|html` link is backed by a KV record whose lifetime is controlled by the Worker's `MAIL_TTL` env var (default 86400 seconds = 1 day). After the TTL elapses, the link returns 404. These are cache links, not archival links — durable storage remains in the Go server.
 
@@ -93,7 +94,7 @@ This runs `go vet ./...`, `go test ./...`, `cd worker && npm test`, and `cd work
    npx wrangler secret put TELEGRAM_ID
    ```
 
-   The Worker's `email()` now sees both env vars set, so each accepted ingest writes the `EmailCache` to the `DB` KV namespace and dispatches a Telegram `sendMessage` to every chat id in `TELEGRAM_ID`.
+   The Worker's `email()` now sees both env vars set, so each inbound email writes the `EmailCache` to the `DB` KV namespace and dispatches a Telegram `sendMessage` to every chat id in `TELEGRAM_ID`, in parallel with the Go ingest POST. Either path failing does not skip the other.
 
 5. **Verify preview URLs and Telegram messages.**
 

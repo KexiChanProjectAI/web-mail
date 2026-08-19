@@ -6,16 +6,13 @@ import type { Env } from "../../types";
 import { email } from "../..";
 
 /**
- * Upstream-style `emailHandler` — task 4.
+ * Upstream-style `emailHandler`.
  *
- * The orchestration (parse-locally → POST raw MIME to Go → only on
- * `status: accepted` write KV cache + send Telegram → swallow any
- * Telegram/cache failure without `setReject`) lives in `email()` in
- * `../../index`. `emailHandler` is the canonical upstream export name
- * and is what other modules of the surface import. We keep this file
- * as a thin re-export so the orchestration is testable from
- * `src/index.ts` while the public surface name lives where the
- * upstream code expects it.
+ * Orchestration lives in `email()` in `../../index`: parse locally,
+ * then run Go ingest and preview/Telegram in parallel. Either path
+ * failing is logged on its own side — ingest failures `setReject` so
+ * Cloudflare can retry durable storage; Telegram/cache failures never
+ * `setReject`. `emailHandler` is the canonical upstream export name.
  *
  * The raw-MIME ingest contract is unchanged: this handler does NOT
  * touch the Go payload shape.
