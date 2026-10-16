@@ -119,3 +119,20 @@ func TestIngest_VerifiesContentHashRecord(t *testing.T) {
 		t.Fatalf("content hash = %s, want %s", hash, ingest.HashBytes(raw))
 	}
 }
+
+func TestIngest_ISO8859HTML(t *testing.T) {
+	suite := SetupSuite(t)
+	defer TeardownSuite(suite)
+
+	messageID := ingestRaw(t, suite, uniqueMessage(t, "iso8859-html.eml", "ISO-8859-1", "recipient@example.com"))
+	var textBody, htmlBody string
+	if err := suite.db.QueryRow("SELECT COALESCE(text_body,''), COALESCE(html_body,'') FROM messages WHERE id = ?", messageID).Scan(&textBody, &htmlBody); err != nil {
+		t.Fatalf("select bodies: %v", err)
+	}
+	if !strings.Contains(htmlBody, "Schöne") || !strings.Contains(htmlBody, "565503") {
+		t.Fatalf("html_body = %q", htmlBody)
+	}
+	if !strings.Contains(textBody, "565503") || !strings.Contains(textBody, "ö") {
+		t.Fatalf("text_body = %q", textBody)
+	}
+}

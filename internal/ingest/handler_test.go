@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"lite-mail/internal/config"
 	"lite-mail/internal/storage"
@@ -183,5 +184,37 @@ func TestFallbackExtractsHeaders(t *testing.T) {
 	}
 	if !strings.HasPrefix(result.TextBody, "[Parse Error:") {
 		t.Errorf("TextBody should start with '[Parse Error:', got %q", result.TextBody)
+	}
+}
+
+func TestFallbackDecodesCharset(t *testing.T) {
+	raw := loadFixture(t, "iso8859-html.eml")
+	result := fallbackParsedMessageWithError(raw, HashBytes(raw), fmt.Errorf("simulated parse failure"))
+	if !utf8.ValidString(result.HTMLBody) {
+		t.Fatalf("HTMLBody is not valid UTF-8: %q", result.HTMLBody)
+	}
+	if !strings.Contains(result.HTMLBody, "Schöne") || !strings.Contains(result.HTMLBody, "565503") {
+		t.Fatalf("HTMLBody = %q", result.HTMLBody)
+	}
+}
+
+func TestFallbackDecodesTransferEncodingAndCharset(t *testing.T) {
+	raw := []byte("From: sender@example.com\n" +
+		"Subject: =?iso-8859-1?Q?Gr=FC=DFe?=\n" +
+		"MIME-Version: 1.0\n" +
+		"Content-Type: multipart/alternative; boundary=\"b\"\n" +
+		"\n" +
+		"--b\n" +
+		"Content-Type: text/html; charset=iso-8859-1\n" +
+		"Content-Transfer-Encoding: quoted-printable\n" +
+		"\n" +
+		"<p style=3D\"x\">Sch=F6n</p>\n" +
+		"--b--\n")
+	result := fallbackParsedMessageWithError(raw, HashBytes(raw), fmt.Errorf("simulated"))
+	if result.Subject != "Grüße" {
+		t.Fatalf("Subject = %q", result.Subject)
+	}
+	if !strings.Contains(result.HTMLBody, `<p style="x">Schön</p>`) {
+		t.Fatalf("HTMLBody = %q", result.HTMLBody)
 	}
 }

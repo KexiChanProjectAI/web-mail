@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"jaytaylor.com/html2text"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -14,7 +13,18 @@ import (
 	"net/mail"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"golang.org/x/net/html/charset"
+	"jaytaylor.com/html2text"
 )
+
+// headerDecoder decodes RFC 2047 encoded words in any charset known to the
+// WHATWG encoding index, not only the utf-8/iso-8859-1/us-ascii built-ins.
+var headerDecoder = &mime.WordDecoder{CharsetReader: charset.NewReaderLabel}
+
+// addressParser parses address headers using headerDecoder for display names.
+var addressParser = &mail.AddressParser{WordDecoder: headerDecoder}
 
 // ParsedMessage contains metadata and content extracted from a raw MIME message.
 type ParsedMessage struct {
@@ -52,19 +62,16 @@ func ParseMIME(raw []byte) (*ParsedMessage, error) {
 
 	parsed := &ParsedMessage{ContentHash: HashBytes(raw)}
 	if from := msg.Header.Get("From"); from != "" {
-		addr, err := mail.ParseAddress(from)
+		addr, err := addressParser.Parse(from)
 		if err != nil {
-			parsed.Sender = from // Keep raw value on parse failure
+			parsed.Sender = decodeText([]byte(from), "") // Keep raw value on parse failure, as valid UTF-8
 			// Don't return error - continue processing
 		} else {
 			parsed.Sender = canonicalEmail(addr.Address)
 		}
 	}
 
-	parsed.Subject, err = (&mime.WordDecoder{}).DecodeHeader(msg.Header.Get("Subject"))
-	if err != nil {
-		parsed.Subject = msg.Header.Get("Subject")
-	}
+	parsed.Subject = decodeHeaderText(msg.Header.Get("Subject"))
 	if date, err := msg.Header.Date(); err == nil {
 		parsed.MessageDate = date
 	}
@@ -94,7 +101,7 @@ func parseRecipients(header mail.Header, name, recipientType string) []Recipient
 	values := header[name]
 	recipients := make([]Recipient, 0)
 	for _, value := range values {
-		addresses, err := mail.ParseAddressList(value)
+		addresses, err := addressParser.ParseList(value)
 		if err != nil {
 			continue
 		}
@@ -167,6 +174,7 @@ func consumeLeaf(header mail.Header, body io.Reader, mediaType string, parsed *P
 	if filename == "" {
 		filename = contentTypeParams["name"]
 	}
+	filename = decodeHeaderText(filename)
 	disposition := strings.ToLower(header.Get("Content-Disposition"))
 	isAttachment := filename != "" || strings.HasPrefix(disposition, "attachment")
 
@@ -183,11 +191,56 @@ func consumeLeaf(header mail.Header, body io.Reader, mediaType string, parsed *P
 
 	switch mediaType {
 	case "text/plain":
-		parsed.TextBody += string(content)
+		parsed.TextBody += decodeText(content, contentTypeParams["charset"])
 	case "text/html":
-		parsed.HTMLBody += string(content)
+		parsed.HTMLBody += decodeText(content, contentTypeParams["charset"])
 	}
 	return nil
+}
+
+// decodeText converts a text/* MIME body to valid UTF-8 using the charset
+// label from its Content-Type. A missing label means UTF-8. Valid UTF-8 that is
+// labeled utf-8 or us-ascii is returned byte-for-byte. Unknown labels and bytes
+// that are invalid for the declared UTF-8/ASCII label fall back to windows-1252
+// (a superset of ISO-8859-1), so the result is always valid UTF-8 and the
+// message is never dropped because of its encoding.
+func decodeText(content []byte, charsetLabel string) string {
+	label := strings.ToLower(strings.TrimSpace(charsetLabel))
+	if label == "" {
+		label = "utf-8"
+	}
+
+	switch label {
+	case "utf-8", "utf8", "us-ascii", "ascii":
+		if utf8.Valid(content) {
+			return string(content)
+		}
+		// Mislabelled 8-bit content: treat as windows-1252.
+		label = "windows-1252"
+	}
+
+	reader, err := charset.NewReaderLabel(label, bytes.NewReader(content))
+	if err != nil {
+		reader, err = charset.NewReaderLabel("windows-1252", bytes.NewReader(content))
+	}
+	if err == nil {
+		if decoded, readErr := io.ReadAll(reader); readErr == nil {
+			return strings.ToValidUTF8(string(decoded), "\uFFFD")
+		}
+	}
+	return strings.ToValidUTF8(string(content), "\uFFFD")
+}
+
+// decodeHeaderText decodes RFC 2047 encoded words in a header value and
+// guarantees valid UTF-8, falling back to the raw value when decoding fails.
+func decodeHeaderText(value string) string {
+	if value == "" {
+		return ""
+	}
+	if decoded, err := headerDecoder.DecodeHeader(value); err == nil {
+		value = decoded
+	}
+	return decodeText([]byte(value), "")
 }
 
 // decodeContent wraps the body reader with the appropriate decoder based on

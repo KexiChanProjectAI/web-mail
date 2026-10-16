@@ -87,6 +87,11 @@ func (h *IngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	contentHash := HashBytes(raw)
 	duplicate, err := h.isDuplicate(r.Context(), contentHash)
 	if err != nil {
+		slog.Error("ingest duplicate check failed",
+			"request_id", requestID,
+			"content_hash", contentHash,
+			"err", err,
+		)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "check duplicate"})
 		return
 	}
@@ -115,12 +120,23 @@ func (h *IngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.storage.SaveRawMIME(contentHash, raw); err != nil {
+		slog.Error("ingest save raw MIME failed",
+			"request_id", requestID,
+			"content_hash", contentHash,
+			"err", err,
+		)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save raw MIME"})
 		return
 	}
 
 	messageID, err := h.persist(r.Context(), parsed, parserStatus, parserError)
 	if err != nil {
+		slog.Error("ingest persist failed",
+			"request_id", requestID,
+			"ip", clientIP,
+			"content_hash", contentHash,
+			"err", fmt.Errorf("persist message: %w", err),
+		)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "persist message"})
 		return
 	}
@@ -206,11 +222,11 @@ func fallbackParsedMessageWithError(raw []byte, contentHash string, parseErr err
 
 	// Extract headers (swallow individual errors)
 	if from := msg.Header.Get("From"); from != "" {
-		if addr, err := mail.ParseAddress(from); err == nil {
+		if addr, err := addressParser.Parse(from); err == nil {
 			parsed.Sender = canonicalEmail(addr.Address)
 		}
 	}
-	parsed.Subject = msg.Header.Get("Subject")
+	parsed.Subject = decodeHeaderText(msg.Header.Get("Subject"))
 
 	// Try to extract HTML body
 	mediaType, params, mediaErr := mime.ParseMediaType(msg.Header.Get("Content-Type"))
@@ -227,25 +243,36 @@ func fallbackParsedMessageWithError(raw []byte, contentHash string, parseErr err
 					break
 				}
 				partHeader := mail.Header(part.Header)
-				partMediaType, _, _ := mime.ParseMediaType(partHeader.Get("Content-Type"))
+				partMediaType, partParams, _ := mime.ParseMediaType(partHeader.Get("Content-Type"))
 				partMediaType = strings.ToLower(partMediaType)
 				if partMediaType == "text/html" {
-					partContent, _ := io.ReadAll(part)
+					partContent := readFallbackBody(partHeader, part)
 					if len(partContent) > 0 {
-						parsed.HTMLBody = string(partContent)
+						parsed.HTMLBody = decodeText(partContent, partParams["charset"])
 						break
 					}
 				}
 			}
 		}
 	} else if strings.HasPrefix(strings.ToLower(mediaType), "text/html") {
-		content, readErr := io.ReadAll(msg.Body)
-		if readErr == nil && len(content) > 0 {
-			parsed.HTMLBody = string(content)
+		content := readFallbackBody(msg.Header, msg.Body)
+		if len(content) > 0 {
+			parsed.HTMLBody = decodeText(content, params["charset"])
 		}
 	}
 
 	return parsed
+}
+
+// readFallbackBody undoes the Content-Transfer-Encoding on a best-effort basis.
+// Whatever was read before a decoding error is kept.
+func readFallbackBody(header mail.Header, body io.Reader) []byte {
+	reader, err := decodeContent(header, body)
+	if err != nil {
+		reader = body
+	}
+	content, _ := io.ReadAll(reader)
+	return content
 }
 
 func nullableString(value string) sql.NullString {

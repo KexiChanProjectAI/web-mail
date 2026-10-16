@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"lite-mail/internal/testutil"
 )
@@ -196,5 +197,133 @@ func TestParseMIMEHTMLWithStyleTag(t *testing.T) {
 	// TextBody must NOT contain HTML tags
 	if strings.Contains(msg.TextBody, "<strong>") || strings.Contains(msg.TextBody, "<p>") {
 		t.Fatal("TextBody should not contain HTML tags after conversion")
+	}
+}
+
+func TestParseMIMEISO8859HTML(t *testing.T) {
+	msg, err := ParseMIME(loadFixture(t, "iso8859-html.eml"))
+	if err != nil {
+		t.Fatalf("ParseMIME: %v", err)
+	}
+	if !utf8.ValidString(msg.HTMLBody) {
+		t.Fatalf("HTMLBody is not valid UTF-8: %q", msg.HTMLBody)
+	}
+	if strings.Contains(msg.HTMLBody, "\xf6") {
+		t.Fatalf("HTMLBody still contains raw 0xF6 byte: %q", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "Schöne Grüße") {
+		t.Fatalf("HTMLBody should contain decoded Latin-1 text, got = %q", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "<strong>565503</strong>") {
+		t.Fatalf("HTMLBody should contain the code, got = %q", msg.HTMLBody)
+	}
+	if !utf8.ValidString(msg.TextBody) || !strings.Contains(msg.TextBody, "565503") || !strings.Contains(msg.TextBody, "ö") {
+		t.Fatalf("TextBody should be decoded UTF-8 with the code, got = %q", msg.TextBody)
+	}
+}
+
+func TestDecodeText(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		label string
+		in    []byte
+		want  string
+	}{
+		{name: "utf-8 passthrough", label: "utf-8", in: []byte("输入此临时验证码 ö"), want: "输入此临时验证码 ö"},
+		{name: "missing label passthrough", label: "", in: []byte("plain ascii"), want: "plain ascii"},
+		{name: "us-ascii passthrough", label: "us-ascii", in: []byte("code 565503"), want: "code 565503"},
+		{name: "iso-8859-1", label: "iso-8859-1", in: []byte("Sch\xf6n"), want: "Schön"},
+		{name: "latin1 alias", label: "latin1", in: []byte("Sch\xf6n"), want: "Schön"},
+		{name: "quoted upper-case label", label: " ISO-8859-1 ", in: []byte("\xf6"), want: "ö"},
+		{name: "windows-1252", label: "windows-1252", in: []byte("\x93hi\x94"), want: "\u201chi\u201d"},
+		{name: "missing label with 8-bit byte", label: "", in: []byte("Sch\xf6n"), want: "Schön"},
+		{name: "us-ascii mislabelled 8-bit", label: "us-ascii", in: []byte("Sch\xf6n"), want: "Schön"},
+		{name: "utf-8 mislabelled latin1", label: "utf-8", in: []byte("Sch\xf6n 565503"), want: "Schön 565503"},
+		{name: "unknown label", label: "x-bogus", in: []byte("Sch\xf6n"), want: "Schön"},
+		{name: "iso-8859-2", label: "iso-8859-2", in: []byte("\xb1"), want: "ą"},
+		{name: "gb2312", label: "gb2312", in: []byte("\xc4\xe3\xba\xc3"), want: "你好"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := decodeText(tc.in, tc.label)
+			if !utf8.ValidString(got) {
+				t.Fatalf("decodeText returned invalid UTF-8: %q", got)
+			}
+			if got != tc.want {
+				t.Fatalf("decodeText(%q, %q) = %q, want %q", tc.in, tc.label, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseMIMEEncodedWordCharsets(t *testing.T) {
+	raw := []byte("From: =?gb2312?B?xOO6ww==?= <Sender@Example.com>\n" +
+		"To: =?windows-1252?Q?J=F6rg?= <jorg@example.com>, plain@example.com\n" +
+		"Subject: =?windows-1252?Q?Sch=F6n?= =?iso-8859-2?Q?=B1?=\n" +
+		"MIME-Version: 1.0\n" +
+		"Content-Type: text/plain; charset=utf-8\n" +
+		"\n" +
+		"body\n")
+	msg, err := ParseMIME(raw)
+	if err != nil {
+		t.Fatalf("ParseMIME: %v", err)
+	}
+	if msg.Subject != "Schöną" {
+		t.Fatalf("Subject = %q", msg.Subject)
+	}
+	if msg.Sender != "sender@example.com" {
+		t.Fatalf("Sender = %q", msg.Sender)
+	}
+	if len(msg.Recipients) != 2 || msg.Recipients[0].Email != "jorg@example.com" || msg.Recipients[1].Email != "plain@example.com" {
+		t.Fatalf("Recipients = %#v", msg.Recipients)
+	}
+}
+
+func TestParseMIMERaw8BitHeaders(t *testing.T) {
+	raw := []byte("From: \"J\xf6rg\" <<bad\n" +
+		"To: user@example.com\n" +
+		"Subject: Gr\xfc\xdfe\n" +
+		"MIME-Version: 1.0\n" +
+		"Content-Type: multipart/mixed; boundary=\"b\"\n" +
+		"\n" +
+		"--b\n" +
+		"Content-Type: text/plain; charset=iso-8859-1\n" +
+		"Content-Transfer-Encoding: quoted-printable\n" +
+		"\n" +
+		"Sch=F6n\n" +
+		"--b\n" +
+		"Content-Type: application/pdf\n" +
+		"Content-Disposition: attachment; filename=\"R\xe9sum\xe9.pdf\"\n" +
+		"\n" +
+		"%PDF-\xff\xfe\n" +
+		"--b\n" +
+		"Content-Type: application/pdf\n" +
+		"Content-Disposition: attachment; filename=\"=?iso-8859-1?Q?J=F6rg.pdf?=\"\n" +
+		"\n" +
+		"%PDF-\n" +
+		"--b--\n")
+	msg, err := ParseMIME(raw)
+	if err != nil {
+		t.Fatalf("ParseMIME: %v", err)
+	}
+	if msg.Subject != "Grüße" {
+		t.Fatalf("Subject = %q", msg.Subject)
+	}
+	if !utf8.ValidString(msg.Sender) || !strings.Contains(msg.Sender, "ö") {
+		t.Fatalf("Sender fallback should be valid UTF-8, got = %q", msg.Sender)
+	}
+	if !strings.Contains(msg.TextBody, "Schön") {
+		t.Fatalf("TextBody = %q", msg.TextBody)
+	}
+	if len(msg.Attachments) != 2 {
+		t.Fatalf("Attachments len = %d, want 2", len(msg.Attachments))
+	}
+	if got := msg.Attachments[0].OriginalFilename; got != "Résumé.pdf" {
+		t.Fatalf("raw 8-bit filename = %q", got)
+	}
+	if got := msg.Attachments[1].OriginalFilename; got != "Jörg.pdf" {
+		t.Fatalf("encoded-word filename = %q", got)
+	}
+	if !strings.Contains(string(msg.Attachments[0].Content), "\xff\xfe") {
+		t.Fatalf("attachment bytes must be left untouched, got = %q", msg.Attachments[0].Content)
 	}
 }
