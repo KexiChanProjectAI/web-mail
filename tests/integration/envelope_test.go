@@ -15,17 +15,22 @@ import (
 
 // forwardedMessage is mail a tenant forwarded to our catch-all: the To header
 // names the original recipient, Cloudflare's Received header the real one.
+// An empty headerTo leaves the To header out, as for Bcc-only delivery.
 func forwardedMessage(headerTo, envelopeTo string) []byte {
+	to := ""
+	if headerTo != "" {
+		to = "To: " + headerTo + "\r\n"
+	}
 	return []byte(fmt.Sprintf("Received: from relay.example (2a01:111::3)\r\n"+
 		"        by cloudflare-email.org (cloudflare) id test\r\n"+
 		"        for <%s>; Tue, 17 Nov 2026 14:07:09 +0000\r\n"+
 		"From: Security <security-noreply@vendor.example>\r\n"+
-		"To: %s\r\n"+
+		"%s"+
 		"Subject: Weekly digest %d\r\n"+
 		"Date: Tue, 17 Nov 2026 14:07:10 +0000\r\n"+
 		"Content-Type: text/plain; charset=utf-8\r\n"+
 		"\r\n"+
-		"digest body\r\n", envelopeTo, headerTo, time.Now().UnixNano()))
+		"digest body\r\n", envelopeTo, to, time.Now().UnixNano()))
 }
 
 func postIngestEnvelope(t *testing.T, suite *IntegrationTestSuite, raw []byte, envelopeTo string) (string, int64) {
@@ -63,7 +68,7 @@ func listTotal(t *testing.T, suite *IntegrationTestSuite, cookies []*http.Cookie
 	return decodeJSON[listResponse](t, getWithCookies(t, suite, path, cookies)).Total
 }
 
-func TestEnvelope_ForwardedMailBelongsToEnvelopeRecipient(t *testing.T) {
+func TestEnvelope_ForwardedMailBelongsToToRecipient(t *testing.T) {
 	suite := SetupSuite(t)
 	defer TeardownSuite(suite)
 
@@ -73,20 +78,23 @@ func TestEnvelope_ForwardedMailBelongsToEnvelopeRecipient(t *testing.T) {
 		t.Fatalf("ingest = %s %d", status, id)
 	}
 
-	owner := asUser(t, suite, "owner@corp.example", "catch-all@mine.example")
-	domainOwner := asUser(t, suite, "domain@corp.example", "*@mine.example")
-	headerOnly := asUser(t, suite, "header@corp.example", "*@tenant.example")
+	owner := asUser(t, suite, "owner@corp.example", "yzs@tenant.example")
+	domainOwner := asUser(t, suite, "domain@corp.example", "*@tenant.example")
+	envelopeOnly := asUser(t, suite, "envelope@corp.example", "*@mine.example")
 
 	if got := listTotal(t, suite, owner, "/api/messages"); got != 1 {
-		t.Fatalf("exact envelope grant sees %d messages, want 1", got)
+		t.Fatalf("exact To grant sees %d messages, want 1", got)
 	}
-	if got := listTotal(t, suite, domainOwner, "/api/messages?mailbox=catch-all@mine.example"); got != 1 {
-		t.Fatalf("domain envelope grant with mailbox filter sees %d, want 1", got)
+	if got := listTotal(t, suite, domainOwner, "/api/messages?mailbox=yzs@tenant.example"); got != 1 {
+		t.Fatalf("domain To grant with mailbox filter sees %d, want 1", got)
 	}
-	if got := listTotal(t, suite, headerOnly, "/api/messages"); got != 0 {
-		t.Fatalf("grant on the To header sees %d messages, want 0", got)
+	if got := listTotal(t, suite, envelopeOnly, "/api/messages"); got != 0 {
+		t.Fatalf("grant on the envelope recipient sees %d messages, want 0", got)
 	}
-	assertStatus(t, getWithCookies(t, suite, fmt.Sprintf("/api/messages/%d", id), headerOnly), http.StatusNotFound)
+	if got := listTotal(t, suite, envelopeOnly, "/api/messages?mailbox=catch-all@mine.example"); got != 0 {
+		t.Fatalf("envelope mailbox filter sees %d messages, want 0", got)
+	}
+	assertStatus(t, getWithCookies(t, suite, fmt.Sprintf("/api/messages/%d", id), envelopeOnly), http.StatusNotFound)
 
 	msg := decodeJSON[messageResponse](t, getWithCookies(t, suite, fmt.Sprintf("/api/messages/%d", id), owner))
 	want := []recipientResponse{{Email: "catch-all@mine.example", Type: "envelope"}, {Email: "yzs@tenant.example", Type: "to"}}
@@ -94,15 +102,27 @@ func TestEnvelope_ForwardedMailBelongsToEnvelopeRecipient(t *testing.T) {
 		t.Fatalf("recipients = %+v, want %+v", msg.Recipients, want)
 	}
 
-	// The admin grant editor suggests the envelope mailbox, not the header address.
+	// The admin grant editor suggests the To mailbox, not the envelope address.
 	admin := accessCookies(t, suite, EnvAdminEmail)
 	known := decodeJSON[struct {
 		Addresses []string `json:"addresses"`
 		Domains   []string `json:"domains"`
 	}](t, getWithCookies(t, suite, "/api/admin/mailboxes", admin))
-	if !slices.Contains(known.Addresses, "catch-all@mine.example") || slices.Contains(known.Addresses, "yzs@tenant.example") {
+	if !slices.Contains(known.Addresses, "yzs@tenant.example") || slices.Contains(known.Addresses, "catch-all@mine.example") {
 		t.Fatalf("known mailboxes = %+v", known)
 	}
+}
+
+func TestEnvelope_NoHeaderRecipientUsesEnvelope(t *testing.T) {
+	suite := SetupSuite(t)
+	defer TeardownSuite(suite)
+
+	_, id := postIngestEnvelope(t, suite, forwardedMessage("", "hidden@mine.example"), "hidden@mine.example")
+	reader := asUser(t, suite, "hidden@corp.example", "hidden@mine.example")
+	if got := listTotal(t, suite, reader, "/api/messages"); got != 1 {
+		t.Fatalf("envelope grant on a message without To sees %d, want 1", got)
+	}
+	assertStatus(t, getWithCookies(t, suite, fmt.Sprintf("/api/messages/%d", id), reader), http.StatusOK)
 }
 
 func TestEnvelope_FallsBackToCloudflareReceived(t *testing.T) {
@@ -132,7 +152,7 @@ func TestEnvelope_DuplicateAddsSecondEnvelopeRecipient(t *testing.T) {
 	suite := SetupSuite(t)
 	defer TeardownSuite(suite)
 
-	raw := forwardedMessage("list@lists.example", "a@mine.example")
+	raw := forwardedMessage("", "a@mine.example")
 	_, id := postIngestEnvelope(t, suite, raw, "a@mine.example")
 	status, _ := postIngestEnvelope(t, suite, raw, "b@mine.example")
 	if status != "duplicate" {
@@ -182,18 +202,18 @@ func TestEnvelope_Backfill(t *testing.T) {
 	}
 }
 
-func TestEnvelope_AuditRecordsEnvelopeMailbox(t *testing.T) {
+func TestEnvelope_AuditRecordsToMailbox(t *testing.T) {
 	suite := SetupSuite(t)
 	defer TeardownSuite(suite)
 
 	_, id := postIngestEnvelope(t, suite, forwardedMessage("yzs@tenant.example", "catch-all@mine.example"), "catch-all@mine.example")
-	// Granted both the envelope domain and the header domain: the access still
-	// goes through the envelope mailbox only.
+	// Granted both the envelope domain and the To domain: the access goes
+	// through the To mailbox only.
 	reader := asUser(t, suite, "both@corp.example", "*@mine.example", "*@tenant.example")
 	assertStatus(t, getWithCookies(t, suite, fmt.Sprintf("/api/messages/%d", id), reader), http.StatusOK)
 
 	rows := auditRows(t, suite, "event = 'message_view' AND message_id = ?", id)
-	if len(rows) != 1 || rows[0].Mailbox != "catch-all@mine.example" {
+	if len(rows) != 1 || rows[0].Mailbox != "yzs@tenant.example" {
 		t.Fatalf("message_view audit rows = %+v", rows)
 	}
 }

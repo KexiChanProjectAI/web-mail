@@ -46,8 +46,8 @@ func recordAccess(l *audit.Logger, db *sql.DB, r *http.Request, session *auth.Se
 }
 
 // accessedMailboxes returns the message's mailbox recipients that the session
-// may read, in order, without duplicates. Mailbox recipients are the envelope
-// recipients, or To/Cc/Bcc when none was recorded, as in scopeClause.
+// may read, in order, without duplicates. Mailbox recipients are To/Cc/Bcc,
+// or the envelope recipient when there are none, as in scopeClause.
 func accessedMailboxes(ctx context.Context, db *sql.DB, session *auth.Session, messageID int64) ([]string, error) {
 	rows, err := db.QueryContext(ctx, "SELECT mr.recipient_email FROM message_recipients mr WHERE mr.message_id = ? AND "+
 		maildb.MailboxRecipientCondition("mr", "mr.message_id")+" ORDER BY mr.id", messageID)

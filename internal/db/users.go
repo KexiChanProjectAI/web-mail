@@ -215,12 +215,12 @@ func (s *UserStore) DeleteGrant(ctx context.Context, userID, grantID int64) erro
 
 // MailboxRecipientCondition is an SQL condition over message_recipients alias
 // rAlias that keeps the rows deciding which mailbox a message belongs to: its
-// envelope recipients, or its To/Cc/Bcc rows when no envelope recipient was
-// recorded (mail ingested before envelope tracking that could not be backfilled).
+// To/Cc/Bcc header recipients, or its envelope recipient (where Cloudflare
+// delivered it) only when the message has no header recipient at all.
 // messageIDExpr is the SQL expression for the message id in the outer query.
 func MailboxRecipientCondition(rAlias, messageIDExpr string) string {
-	return "(" + rAlias + ".recipient_type = 'envelope' OR NOT EXISTS (SELECT 1 FROM message_recipients env WHERE env.message_id = " +
-		messageIDExpr + " AND env.recipient_type = 'envelope'))"
+	return "(" + rAlias + ".recipient_type <> 'envelope' OR NOT EXISTS (SELECT 1 FROM message_recipients hdr WHERE hdr.message_id = " +
+		messageIDExpr + " AND hdr.recipient_type <> 'envelope'))"
 }
 
 // KnownMailboxes lists recipient addresses and domains seen in stored mail,

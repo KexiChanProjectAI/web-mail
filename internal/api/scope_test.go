@@ -42,7 +42,7 @@ func TestScopeClauseAndWhere(t *testing.T) {
 	}
 	sql, _ := scopeClause(&auth.Session{}, "")
 	if sql != "EXISTS (SELECT 1 FROM message_recipients mr WHERE mr.message_id = m.id AND "+
-		"(mr.recipient_type = 'envelope' OR NOT EXISTS (SELECT 1 FROM message_recipients env WHERE env.message_id = m.id AND env.recipient_type = 'envelope'))"+
+		"(mr.recipient_type <> 'envelope' OR NOT EXISTS (SELECT 1 FROM message_recipients hdr WHERE hdr.message_id = m.id AND hdr.recipient_type <> 'envelope'))"+
 		" AND 0 = 1)" {
 		t.Fatalf("empty scope = %q", sql)
 	}
