@@ -9,6 +9,8 @@ import (
 
 // scopeClause returns an SQL condition over messages alias "m" that limits rows
 // to the mailboxes the session may read, or "" when the session is unrestricted.
+// A message belongs to its envelope recipients (where Cloudflare delivered it),
+// not to its To/Cc/Bcc headers, which the sender writes and forwarding keeps.
 // mailbox, when non-empty, narrows to one canonical recipient address; callers
 // must have checked session.HasMailboxAccess(mailbox) first.
 func scopeClause(session *auth.Session, mailbox string) (string, []any) {
@@ -16,7 +18,7 @@ func scopeClause(session *auth.Session, mailbox string) (string, []any) {
 	if pred == "" {
 		return "", nil
 	}
-	return "EXISTS (SELECT 1 FROM message_recipients mr WHERE mr.message_id = m.id AND " + pred + ")", args
+	return "EXISTS (SELECT 1 FROM message_recipients mr WHERE mr.message_id = m.id AND " + db.MailboxRecipientCondition("mr", "m.id") + " AND " + pred + ")", args
 }
 
 // recipientPredicate builds the condition over message_recipients alias "mr".
