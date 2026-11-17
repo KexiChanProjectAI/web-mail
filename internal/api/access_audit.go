@@ -9,6 +9,7 @@ import (
 
 	"lite-mail/internal/audit"
 	"lite-mail/internal/auth"
+	maildb "lite-mail/internal/db"
 )
 
 // maxAuditMailboxes caps the rows written for one access. A message reached
@@ -44,10 +45,12 @@ func recordAccess(l *audit.Logger, db *sql.DB, r *http.Request, session *auth.Se
 	}
 }
 
-// accessedMailboxes returns the message's recipients that the session may
-// read, in order, without duplicates.
+// accessedMailboxes returns the message's mailbox recipients that the session
+// may read, in order, without duplicates. Mailbox recipients are the envelope
+// recipients, or To/Cc/Bcc when none was recorded, as in scopeClause.
 func accessedMailboxes(ctx context.Context, db *sql.DB, session *auth.Session, messageID int64) ([]string, error) {
-	rows, err := db.QueryContext(ctx, "SELECT recipient_email FROM message_recipients WHERE message_id = ? ORDER BY id", messageID)
+	rows, err := db.QueryContext(ctx, "SELECT mr.recipient_email FROM message_recipients mr WHERE mr.message_id = ? AND "+
+		maildb.MailboxRecipientCondition("mr", "mr.message_id")+" ORDER BY mr.id", messageID)
 	if err != nil {
 		return nil, err
 	}
