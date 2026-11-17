@@ -19,7 +19,8 @@ type BackfillResult struct {
 
 // BackfillEnvelopeRecipients adds the envelope recipient to messages stored
 // before it was recorded, reading it from each message's raw MIME. With dryRun
-// it only reports. Messages left without one keep falling back to To/Cc/Bcc.
+// it only reports. The envelope recipient is shown as "Delivered to" and
+// decides access for messages without To/Cc/Bcc recipients.
 func BackfillEnvelopeRecipients(ctx context.Context, db *sql.DB, store *storage.Storage, dryRun bool) (*BackfillResult, error) {
 	rows, err := db.QueryContext(ctx, `SELECT m.id, m.raw_mime_path, m.received_at FROM messages m
 WHERE NOT EXISTS (SELECT 1 FROM message_recipients r WHERE r.message_id = m.id AND r.recipient_type = ?)

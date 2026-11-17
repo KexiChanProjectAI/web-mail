@@ -373,8 +373,8 @@ async function attemptIngest(
 		headers: {
 			"Content-Type": "message/rfc822",
 			"X-Lite-Mail-Ingest-PSK": psk,
-			// Envelope recipient (RCPT TO). The mailbox a message belongs to;
-			// the To header can name someone else after forwarding.
+			// Envelope recipient (RCPT TO): shown as "Delivered to", and the
+			// mailbox of a message that has no To/Cc/Bcc recipient.
 			"X-Lite-Mail-To": meta.to,
 		},
 		body,

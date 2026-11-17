@@ -15,8 +15,8 @@ import (
 const EnvelopeToHeader = "X-Lite-Mail-To"
 
 // RecipientTypeEnvelope marks the address Cloudflare Email Routing actually
-// delivered the message to. It decides which mailbox the message belongs to;
-// the To/Cc/Bcc header rows are kept for display only.
+// delivered the message to. It decides which mailbox the message belongs to
+// only when the message has no To/Cc/Bcc recipient.
 const RecipientTypeEnvelope = "envelope"
 
 // cloudflareReceivedFor matches the "for <addr>" clause of the Received header

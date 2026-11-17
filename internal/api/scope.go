@@ -9,8 +9,8 @@ import (
 
 // scopeClause returns an SQL condition over messages alias "m" that limits rows
 // to the mailboxes the session may read, or "" when the session is unrestricted.
-// A message belongs to its envelope recipients (where Cloudflare delivered it),
-// not to its To/Cc/Bcc headers, which the sender writes and forwarding keeps.
+// A message belongs to its To/Cc/Bcc recipients, and to its envelope recipient
+// (where Cloudflare delivered it) only when it has none of those.
 // mailbox, when non-empty, narrows to one canonical recipient address; callers
 // must have checked session.HasMailboxAccess(mailbox) first.
 func scopeClause(session *auth.Session, mailbox string) (string, []any) {
