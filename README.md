@@ -39,6 +39,7 @@ Copy `.env.example` to `.env` and configure:
 - `GOOGLE_ALLOWED_DOMAINS` - Optional email domains allowed to sign in with Google
 - `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` - Accept Cloudflare Access (Zero Trust) JWTs
 - `ADMIN_PSK` - Optional emergency admin key; leave empty to disable
+- `AUDIT_RETENTION_DAYS` - Days to keep the audit log (default 365, 0 = forever)
 - `WORKER_INGEST_PSK` - PSK for worker ingest endpoint
 ## Worker-owned Telegram forwarding
 

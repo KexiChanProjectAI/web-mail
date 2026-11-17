@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"lite-mail/internal/audit"
 	"lite-mail/internal/auth"
 	"lite-mail/internal/config"
 	"lite-mail/internal/emailaddr"
@@ -22,7 +23,11 @@ type MessageHandler struct {
 	db      *sql.DB
 	storage *storage.Storage
 	config  *config.Config
+	audit   *audit.Logger
 }
+
+// SetAudit wires the audit log; nil disables it.
+func (h *MessageHandler) SetAudit(l *audit.Logger) { h.audit = l }
 
 func NewMessageHandler(db *sql.DB, storage *storage.Storage, cfg *config.Config) *MessageHandler {
 	return &MessageHandler{db: db, storage: storage, config: cfg}
@@ -68,6 +73,7 @@ func (h *MessageHandler) GetRawMIME(w http.ResponseWriter, r *http.Request) {
 	rawQuery, rawArgs := rawMessageAuthQuery(session, messageID)
 	err := h.db.QueryRow(rawQuery, rawArgs...).Scan(&contentHash)
 	if errors.Is(err, sql.ErrNoRows) {
+		recordDenied(h.audit, h.db, r, session, messageID, "raw download")
 		http.NotFound(w, r)
 		return
 	}
@@ -81,6 +87,7 @@ func (h *MessageHandler) GetRawMIME(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	recordAccess(h.audit, h.db, r, session, audit.RawDownload, messageID)
 	w.Header().Set("Content-Type", "message/rfc822")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"message-%d.eml\"", messageID))
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
@@ -99,6 +106,7 @@ func (h *MessageHandler) GetMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	msg, err := h.getMessage(messageID, session)
 	if errors.Is(err, sql.ErrNoRows) {
+		recordDenied(h.audit, h.db, r, session, messageID, "message")
 		http.NotFound(w, r)
 		return
 	}
@@ -106,6 +114,7 @@ func (h *MessageHandler) GetMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+	recordAccess(h.audit, h.db, r, session, audit.MessageView, messageID)
 	writeJSON(w, http.StatusOK, msg)
 }
 
@@ -124,6 +133,7 @@ func (h *MessageHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	mailbox := emailaddr.Canonical(r.URL.Query().Get("mailbox"))
 	if mailbox != "" && !session.HasMailboxAccess(mailbox) {
+		h.audit.Record(r, session, audit.AccessDenied, audit.WithMailbox(mailbox), audit.WithDetail("inbox listing outside granted mailboxes"))
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "mailbox not granted"})
 		return
 	}
@@ -161,6 +171,7 @@ FROM messages m `+where+` ORDER BY m.received_at DESC LIMIT ? OFFSET ?`, args...
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+	h.audit.RecordList(r, session, mailbox, listScope(session, q))
 	writeJSON(w, http.StatusOK, map[string]any{"messages": messages, "total": total, "page": page, "per_page": perPage, "mailbox": mailbox})
 }
 

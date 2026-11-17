@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"lite-mail/internal/audit"
 	"lite-mail/internal/auth"
 	"lite-mail/internal/config"
 	"lite-mail/internal/storage"
@@ -18,7 +19,11 @@ type AttachmentHandler struct {
 	db      *sql.DB
 	storage *storage.Storage
 	config  *config.Config
+	audit   *audit.Logger
 }
+
+// SetAudit wires the audit log; nil disables it.
+func (h *AttachmentHandler) SetAudit(l *audit.Logger) { h.audit = l }
 
 func NewAttachmentHandler(db *sql.DB, storage *storage.Storage, cfg *config.Config) *AttachmentHandler {
 	return &AttachmentHandler{db: db, storage: storage, config: cfg}
@@ -44,6 +49,7 @@ func (h *AttachmentHandler) GetAttachment(w http.ResponseWriter, r *http.Request
 	query, args := attachmentAuthQuery(session, messageID, idx)
 	err := h.db.QueryRow(query, args...).Scan(&storageKey, &originalFilename, &mimeType, &sizeBytes)
 	if errors.Is(err, sql.ErrNoRows) {
+		recordDenied(h.audit, h.db, r, session, messageID, "attachment")
 		http.NotFound(w, r)
 		return
 	}
@@ -61,6 +67,8 @@ func (h *AttachmentHandler) GetAttachment(w http.ResponseWriter, r *http.Request
 	if filename == "" {
 		filename = "attachment"
 	}
+	recordAccess(h.audit, h.db, r, session, audit.AttachmentDownload, messageID,
+		audit.WithDetail("attachment %d: %s", idx, filename))
 	w.Header().Set("Content-Type", mimeType)
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	w.Header().Set("Content-Length", strconv.FormatInt(sizeBytes, 10))

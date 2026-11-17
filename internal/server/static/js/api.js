@@ -127,6 +127,21 @@
       return request("/api/admin/mailboxes?" + params.toString(), { method: "GET" });
     },
 
+    adminAudit: function (filter, before) {
+      const params = new URLSearchParams();
+      Object.keys(filter || {}).forEach(function (key) {
+        const value = String(filter[key] || "").trim();
+        if (value) {
+          params.set(key, value);
+        }
+      });
+      if (before) {
+        params.set("before", String(before));
+      }
+      params.set("limit", "100");
+      return request("/api/admin/audit?" + params.toString(), { method: "GET" });
+    },
+
     getMessage: function (id) {
       return request("/api/messages/" + encodeURIComponent(id), { method: "GET" });
     },

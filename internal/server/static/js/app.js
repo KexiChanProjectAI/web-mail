@@ -16,12 +16,14 @@ const state = {
   selectedMailbox: '',
   mailboxError: '',
   admin: null,
+  audit: null,
 };
 
 const ROUTES = {
   list: '#/',
   messagePrefix: '#/messages/',
   admin: '#/admin',
+  audit: '#/admin/audit',
 };
 
 const LOGIN_ERRORS = {
@@ -106,6 +108,7 @@ function redirectToLogin() {
   resetMailboxState();
   state.me = null;
   state.admin = null;
+  state.audit = null;
   if (window.location.pathname !== '/login') {
     history.pushState(null, '', '/login');
   }
@@ -296,7 +299,7 @@ function renderAccountBar() {
     who.append(el('span', 'message-chip account-admin-chip', 'Admin'));
   }
   const actions = el('div', 'account-actions');
-  const onAdmin = window.location.hash === ROUTES.admin;
+  const onAdmin = window.location.hash === ROUTES.admin || window.location.hash === ROUTES.audit;
   if (me.is_admin) {
     actions.appendChild(onAdmin
       ? createButton('Inbox', 'tertiary-button', () => navigateTo(ROUTES.list))
@@ -1370,9 +1373,24 @@ function renderAdminUserRow(user) {
   return row;
 }
 
+// renderAdminTabs switches between the users page and the audit log.
+function renderAdminTabs(active) {
+  const nav = el('nav', 'admin-tabs');
+  nav.setAttribute('aria-label', 'Administration');
+  [['users', 'Users and grants', ROUTES.admin], ['audit', 'Audit log', ROUTES.audit]].forEach(([key, label, href]) => {
+    const link = createLinkButton(label, href, 'admin-tab');
+    if (key === active) {
+      link.setAttribute('aria-current', 'page');
+    }
+    nav.appendChild(link);
+  });
+  return nav;
+}
+
 function renderAdminPanel() {
   const admin = adminState();
   const shell = renderShell('Manage access', 'Choose which mailboxes each signed-in account can read.');
+  shell.appendChild(renderAdminTabs('users'));
 
   const panel = el('section', 'panel admin-panel');
   const header = el('div', 'message-list-header');
@@ -1471,6 +1489,326 @@ function renderAdminPanel() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Admin: audit log
+// ---------------------------------------------------------------------------
+
+const AUDIT_EVENT_LABELS = {
+  sign_in: 'Signed in',
+  sign_in_failed: 'Sign-in rejected',
+  sign_out: 'Signed out',
+  mailbox_list: 'Opened inbox',
+  message_view: 'Read message',
+  raw_download: 'Fetched raw source',
+  attachment_download: 'Downloaded attachment',
+  access_denied: 'Access denied',
+  admin_user_create: 'Added user',
+  admin_user_delete: 'Removed user',
+  admin_role_change: 'Changed admin rights',
+  admin_grant_add: 'Granted mailbox',
+  admin_grant_remove: 'Removed mailbox grant',
+};
+
+const AUDIT_EVENT_GROUPS = [
+  ['Sign-in', ['sign_in', 'sign_out']],
+  ['Mail access', ['mailbox_list', 'message_view', 'raw_download', 'attachment_download']],
+  ['Denied', ['access_denied', 'sign_in_failed']],
+  ['Admin changes', ['admin_user_create', 'admin_user_delete', 'admin_role_change', 'admin_grant_add', 'admin_grant_remove']],
+];
+
+const AUDIT_DENIED = new Set(['access_denied', 'sign_in_failed']);
+
+function auditState() {
+  if (!state.audit) {
+    state.audit = { filter: {}, dates: { from: '', to: '' }, events: [], nextBefore: 0, loading: false, error: '', token: 0, focusIndex: -1 };
+  }
+  return state.audit;
+}
+
+function auditFiltersActive(audit) {
+  return Object.values(audit.filter).some((v) => v) || Boolean(audit.dates.from || audit.dates.to);
+}
+
+// localDayToUTC turns a local calendar date into the UTC instant it starts at.
+function localDayToUTC(day, addDays = 0) {
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(y, m - 1, d + addDays).toISOString();
+}
+
+function auditQuery(audit) {
+  const query = { ...audit.filter };
+  if (audit.dates.from) {
+    query.since = localDayToUTC(audit.dates.from);
+  }
+  if (audit.dates.to) {
+    query.until = localDayToUTC(audit.dates.to, 1); // inclusive "to" date
+  }
+  return query;
+}
+
+async function showAuditLog() {
+  if (!state.me?.is_admin) {
+    await showAdminPanel();
+    return;
+  }
+  renderShell('Audit log', 'Loading events…');
+  await loadAudit(false);
+}
+
+// loadAudit fetches the first page for the current filter, or the next page
+// when more is true. A newer request makes older responses irrelevant.
+async function loadAudit(more) {
+  const audit = auditState();
+  if (more && audit.loading) {
+    return;
+  }
+  const token = ++audit.token;
+  audit.loading = true;
+  audit.error = '';
+  document.querySelectorAll('.audit-more, .audit-apply').forEach((button) => { button.disabled = true; });
+  const previousCount = more ? audit.events.length : 0;
+  try {
+    const payload = await window.API.adminAudit(auditQuery(audit), more ? audit.nextBefore : 0);
+    if (token !== audit.token) {
+      return;
+    }
+    const events = payload?.events || [];
+    audit.events = more ? audit.events.concat(events) : events;
+    audit.nextBefore = payload?.next_before || 0;
+    audit.focusIndex = more && events.length ? previousCount : -1;
+  } catch (error) {
+    if (token !== audit.token) {
+      return;
+    }
+    if (isUnauthorizedError(error)) {
+      redirectToLogin();
+      return;
+    }
+    audit.error = sentenceCase(error.message) || 'Could not load the audit log.';
+  }
+  audit.loading = false;
+  renderAuditLog();
+}
+
+function applyAuditFilter(patch) {
+  const audit = auditState();
+  audit.filter = { ...audit.filter, ...patch };
+  void loadAudit(false);
+}
+
+function auditFilterChip(label, keys) {
+  const chip = el('span', 'grant-chip audit-filter-chip');
+  chip.append(el('span', 'grant-chip-label', label));
+  const remove = createButton('×', 'grant-chip-remove', () => {
+    const patch = {};
+    keys.forEach((key) => { patch[key] = ''; });
+    applyAuditFilter(patch);
+  });
+  remove.setAttribute('aria-label', `Clear filter: ${label}`);
+  chip.appendChild(remove);
+  return chip;
+}
+
+function renderAuditFilters() {
+  const audit = auditState();
+  const details = el('details', 'audit-filter-box');
+  details.open = window.innerWidth > 768 || auditFiltersActive(audit);
+  const activeCount = ['actor', 'mailbox', 'event'].filter((k) => audit.filter[k]).length
+    + (audit.dates.from ? 1 : 0) + (audit.dates.to ? 1 : 0);
+  details.appendChild(el('summary', 'audit-filter-summary', activeCount ? `Filters (${activeCount} active)` : 'Filters'));
+
+  const form = el('form', 'audit-filters');
+  const field = (name, labelText, type, value, placeholder, extra = {}) => {
+    const wrap = el('label', 'audit-field');
+    wrap.appendChild(el('span', 'message-search-label', labelText));
+    const input = el('input', 'form-input');
+    Object.assign(input, { name, type, placeholder: placeholder || '', value: value || '', autocomplete: 'off', spellcheck: false }, extra);
+    if (extra.autocapitalize) {
+      input.setAttribute('autocapitalize', extra.autocapitalize);
+    }
+    wrap.appendChild(input);
+    return wrap;
+  };
+  const emailHints = { inputMode: 'email', autocapitalize: 'none' };
+  const eventWrap = el('label', 'audit-field');
+  eventWrap.appendChild(el('span', 'message-search-label', 'Event'));
+  const select = el('select', 'form-input');
+  select.name = 'event';
+  select.appendChild(new Option('All events', ''));
+  AUDIT_EVENT_GROUPS.forEach(([groupLabel, names]) => {
+    const group = el('optgroup');
+    group.label = groupLabel;
+    names.forEach((name) => group.appendChild(new Option(AUDIT_EVENT_LABELS[name], name)));
+    select.appendChild(group);
+  });
+  select.value = audit.filter.event || '';
+  eventWrap.appendChild(select);
+
+  form.append(
+    field('actor', 'Who (login email)', 'text', audit.filter.actor, 'Email', emailHints),
+    field('mailbox', 'Mailbox', 'text', audit.filter.mailbox, 'Address or domain', emailHints),
+    eventWrap,
+    field('from', 'From date', 'date', audit.dates.from),
+    field('to', 'To date', 'date', audit.dates.to),
+  );
+  const actions = el('div', 'audit-filter-actions');
+  const apply = el('button', 'primary-button audit-apply', 'Apply filters');
+  apply.type = 'submit';
+  apply.disabled = audit.loading;
+  const reset = createButton('Reset', 'tertiary-button', () => {
+    audit.filter = {};
+    audit.dates = { from: '', to: '' };
+    void loadAudit(false);
+  });
+  reset.disabled = !auditFiltersActive(audit);
+  actions.append(apply, reset);
+  form.appendChild(actions);
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    audit.filter = {
+      session: audit.filter.session || '',
+      actor: String(data.get('actor') || '').trim(),
+      mailbox: String(data.get('mailbox') || '').trim(),
+      event: String(data.get('event') || ''),
+    };
+    audit.dates = { from: String(data.get('from') || ''), to: String(data.get('to') || '') };
+    void loadAudit(false);
+  });
+  details.appendChild(form);
+  return details;
+}
+
+function formatAuditTime(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' }).format(parsed);
+}
+
+function renderAuditRow(event, index) {
+  const audit = auditState();
+  const row = el('li', 'audit-row');
+  row.dataset.event = event.event;
+  row.tabIndex = -1;
+  row.dataset.index = String(index);
+
+  const when = el('time', 'audit-time', formatAuditTime(event.time));
+  when.dateTime = event.time;
+
+  const who = el('div', 'audit-who');
+  const isPSK = event.provider === 'admin_psk';
+  if (event.actor && !isPSK && audit.filter.actor !== event.actor) {
+    const actor = createButton(event.actor, 'audit-link', () => applyAuditFilter({ actor: event.actor }));
+    actor.setAttribute('aria-label', `${event.actor}: show only this person`);
+    who.appendChild(actor);
+  } else {
+    who.appendChild(el('span', 'audit-actor', isPSK ? 'Emergency admin key' : (event.actor || 'unknown')));
+  }
+  if (event.provider && !isPSK) {
+    const provider = el('span', 'audit-provider', `via ${PROVIDER_LABELS[event.provider] || event.provider}`);
+    who.appendChild(provider);
+  }
+
+  const what = el('div', 'audit-what');
+  const label = el('strong', 'audit-event', AUDIT_EVENT_LABELS[event.event] || event.event);
+  if (AUDIT_DENIED.has(event.event)) {
+    const flag = el('span', 'audit-flag', '!');
+    flag.setAttribute('aria-hidden', 'true');
+    label.prepend(flag);
+  }
+  what.appendChild(label);
+  const target = el('div', 'audit-target');
+  if (event.mailbox) {
+    if (audit.filter.mailbox === event.mailbox) {
+      target.appendChild(el('span', 'audit-mailbox', event.mailbox));
+    } else {
+      const mailbox = createButton(event.mailbox, 'audit-link audit-mailbox', () => applyAuditFilter({ mailbox: event.mailbox }));
+      mailbox.setAttribute('aria-label', `${event.mailbox}: show only this mailbox`);
+      target.appendChild(mailbox);
+    }
+  } else if (event.event === 'mailbox_list') {
+    target.appendChild(el('span', 'audit-mailbox', 'All their mailboxes'));
+  }
+  if (event.message_id) {
+    const link = createLinkButton(`Open message #${event.message_id} →`, `${ROUTES.messagePrefix}${event.message_id}`, 'audit-link audit-message-link');
+    target.appendChild(link);
+  }
+  if (target.childNodes.length) {
+    what.appendChild(target);
+  }
+  if (event.detail) {
+    what.appendChild(el('span', 'section-meta audit-detail', event.detail === 'admin' ? 'Admin access (all mailboxes)' : event.detail));
+  }
+
+  const meta = el('div', 'audit-meta');
+  if (event.client_ip) {
+    const ip = el('span', 'audit-ip', event.client_ip);
+    if (event.user_agent) {
+      ip.title = event.user_agent;
+    }
+    meta.appendChild(ip);
+  }
+  if (event.session_key && audit.filter.session !== event.session_key) {
+    const session = createButton('This sign-in', 'audit-link', () => applyAuditFilter({ session: event.session_key }));
+    session.setAttribute('aria-label', `Show every event of this sign-in by ${event.actor || 'unknown'}`);
+    meta.appendChild(session);
+  }
+
+  row.append(when, who, what, meta);
+  return row;
+}
+
+function renderAuditLog() {
+  const audit = auditState();
+  const shell = renderShell('Audit log', 'Who signed in, with which email, and which mailboxes and messages they opened.');
+  shell.appendChild(renderAdminTabs('audit'));
+
+  const panel = el('section', 'panel audit-panel');
+  panel.appendChild(renderAuditFilters());
+
+  if (audit.filter.session) {
+    const active = el('div', 'grant-list audit-active-filters');
+    const owner = audit.events.find((e) => e.session_key === audit.filter.session)?.actor;
+    active.appendChild(auditFilterChip(owner ? `One sign-in by ${owner}` : 'One sign-in', ['session']));
+    panel.appendChild(active);
+  }
+
+  if (audit.error) {
+    const error = el('div', 'form-error', audit.error);
+    error.setAttribute('role', 'alert');
+    panel.appendChild(error);
+  }
+
+  const summary = el('p', 'section-meta audit-summary');
+  summary.setAttribute('role', 'status');
+  if (audit.events.length) {
+    summary.textContent = `${audit.nextBefore ? `Newest ${audit.events.length} events; older ones below` : `${audit.events.length} event${audit.events.length === 1 ? '' : 's'}`}, newest first. Times are in your local time zone.`;
+  } else {
+    summary.textContent = auditFiltersActive(audit) ? 'No events match these filters.' : 'No audit events recorded yet.';
+  }
+  panel.appendChild(summary);
+
+  if (audit.events.length) {
+    const list = el('ol', 'audit-list');
+    list.setAttribute('role', 'list');
+    audit.events.forEach((event, index) => list.appendChild(renderAuditRow(event, index)));
+    panel.appendChild(list);
+  }
+  if (audit.nextBefore) {
+    const more = createButton(audit.loading ? 'Loading…' : 'Load older events', 'secondary-button audit-more', () => void loadAudit(true));
+    more.disabled = audit.loading;
+    panel.appendChild(more);
+  }
+  shell.appendChild(panel);
+
+  if (audit.focusIndex >= 0) {
+    panel.querySelector(`.audit-row[data-index="${audit.focusIndex}"]`)?.focus();
+    audit.focusIndex = -1;
+  }
+}
+
 function parseRoute(hashValue) {
   const hash = hashValue || ROUTES.list;
   if (hash === '' || hash === '#') {
@@ -1481,6 +1819,9 @@ function parseRoute(hashValue) {
   }
   if (hash === ROUTES.admin) {
     return { type: 'admin' };
+  }
+  if (hash === ROUTES.audit) {
+    return { type: 'audit' };
   }
   if (hash.startsWith(ROUTES.messagePrefix)) {
     const messageId = decodeURIComponent(hash.slice(ROUTES.messagePrefix.length)).trim();
@@ -1499,6 +1840,10 @@ async function handleNavigation() {
   const route = parseRoute(window.location.hash);
   if (route.type === 'admin') {
     await showAdminPanel();
+    return;
+  }
+  if (route.type === 'audit') {
+    await showAuditLog();
     return;
   }
   if (route.type === 'message') {

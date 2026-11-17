@@ -28,6 +28,9 @@ type AccessClaims struct {
 	Email   string `json:"email"`
 	Subject string `json:"sub"`
 	Type    string `json:"type"`
+	// IssuedAt is when Cloudflare issued this Access session's token; it
+	// identifies one sign-in for the audit log.
+	IssuedAt time.Time `json:"-"`
 }
 
 // AccessVerifier validates Cloudflare Access JWTs: RS256 signature against the
@@ -81,6 +84,7 @@ func (v *AccessVerifier) Verify(ctx context.Context, raw string) (*AccessClaims,
 		return nil, err
 	}
 	claims.Email = emailaddr.Canonical(claims.Email)
+	claims.IssuedAt = token.IssuedAt
 	if claims.Email == "" {
 		return nil, ErrNoAccessEmail
 	}

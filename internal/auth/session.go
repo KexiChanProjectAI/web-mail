@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"net/http"
@@ -32,6 +33,33 @@ type Session struct {
 	Grants     []Grant
 	ExpiresAt  time.Time
 	Token      string
+	// SessionKey identifies one sign-in in the audit log without exposing
+	// the cookie token or the Access JWT.
+	SessionKey string
+}
+
+// Auditor receives sign-in events. SignIn may be called on every request of
+// a stateless Cloudflare Access session; implementations de-duplicate on
+// Session.SessionKey.
+type Auditor interface {
+	SignIn(r *http.Request, s *Session)
+	SignInFailed(r *http.Request, provider, email, reason string)
+	SignOut(r *http.Request, s *Session)
+}
+
+// CookieSessionKey derives the audit key of a server-side session.
+func CookieSessionKey(token string) string {
+	return "s-" + shortHash(token)
+}
+
+// AccessSessionKey derives the audit key of a Cloudflare Access session.
+func AccessSessionKey(c *AccessClaims) string {
+	return "cf-" + shortHash(c.Email+"|"+c.Subject+"|"+c.IssuedAt.UTC().Format(time.RFC3339))
+}
+
+func shortHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:8])
 }
 
 // HasMailboxAccess reports whether the session may read mail for address.

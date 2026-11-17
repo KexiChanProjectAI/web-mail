@@ -190,6 +190,17 @@ func (s *UserStore) AddGrant(ctx context.Context, userID int64, pattern, created
 	return &g, err
 }
 
+// FindGrant returns grantID only if it belongs to userID.
+func (s *UserStore) FindGrant(ctx context.Context, userID, grantID int64) (*MailboxGrant, error) {
+	var g MailboxGrant
+	err := s.db.QueryRowContext(ctx, "SELECT id, user_id, pattern, created_at, created_by FROM mailbox_grants WHERE id = ? AND user_id = ?", grantID, userID).
+		Scan(&g.ID, &g.UserID, &g.Pattern, &g.CreatedAt, &g.CreatedBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrGrantNotFound
+	}
+	return &g, err
+}
+
 // DeleteGrant removes grantID only if it belongs to userID.
 func (s *UserStore) DeleteGrant(ctx context.Context, userID, grantID int64) error {
 	res, err := s.db.ExecContext(ctx, "DELETE FROM mailbox_grants WHERE id = ? AND user_id = ?", grantID, userID)

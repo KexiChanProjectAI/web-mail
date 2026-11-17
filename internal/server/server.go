@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"lite-mail/internal/api"
+	"lite-mail/internal/audit"
 	"lite-mail/internal/auth"
 	"lite-mail/internal/config"
 	maildb "lite-mail/internal/db"
@@ -60,6 +61,7 @@ type Server struct {
 	authenticator *auth.Authenticator
 	googleHandler *auth.GoogleHandler
 	adminHandler  *api.AdminHandler
+	auditLog      *audit.Logger
 
 	messageHandler    *api.MessageHandler
 	attachmentHandler *api.AttachmentHandler
@@ -108,6 +110,18 @@ func New(cfg *config.Config, db *sql.DB, opts ...Option) *Server {
 		s.googleHandler = auth.NewGoogleHandler(cfg, sessionStore, userStore, o.googleIssuer, o.httpClient)
 	}
 	s.adminHandler = api.NewAdminHandler(userStore, cfg)
+
+	if db != nil {
+		s.auditLog = audit.New(db)
+	}
+	s.authenticator.SetAuditor(auditorOrNil(s.auditLog))
+	s.authHandler.SetAudit(s.authenticator, auditorOrNil(s.auditLog))
+	if s.googleHandler != nil {
+		s.googleHandler.SetAuditor(auditorOrNil(s.auditLog))
+	}
+	s.messageHandler.SetAudit(s.auditLog)
+	s.attachmentHandler.SetAudit(s.auditLog)
+	s.adminHandler.SetAudit(s.auditLog)
 	sameOrigin := middleware.RequireSameOrigin(func() string { return cfg.PublicBaseURL })
 
 	r.Use(middleware.RequestID("X-Request-ID"))
@@ -167,6 +181,7 @@ func New(cfg *config.Config, db *sql.DB, opts ...Option) *Server {
 			r.Post("/users/{id}/grants", s.adminHandler.AddGrant)
 			r.Delete("/users/{id}/grants/{grantId}", s.adminHandler.DeleteGrant)
 			r.Get("/mailboxes", s.adminHandler.ListMailboxes)
+			r.Get("/audit", s.adminHandler.ListAudit)
 		})
 	})
 
@@ -184,6 +199,19 @@ func New(cfg *config.Config, db *sql.DB, opts ...Option) *Server {
 	r.Handle("/static/*", staticHandler)
 
 	return s
+}
+
+// auditorOrNil avoids handing auth a non-nil interface holding a nil logger.
+func auditorOrNil(l *audit.Logger) auth.Auditor {
+	if l == nil {
+		return nil
+	}
+	return l
+}
+
+// StartBackground runs periodic jobs (audit retention) until ctx ends.
+func (s *Server) StartBackground(ctx context.Context) {
+	s.auditLog.StartPruner(ctx, s.config.AuditRetention())
 }
 
 // Start serves HTTP requests on addr. TLS termination is handled by the reverse proxy.

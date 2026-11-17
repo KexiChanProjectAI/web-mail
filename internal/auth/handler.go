@@ -18,6 +18,14 @@ const AccessLogoutPath = "/cdn-cgi/access/logout"
 type AuthHandler struct {
 	sessionStore SessionStore
 	config       *config.Config
+	authn        *Authenticator // resolves the caller on logout, for the audit log
+	auditor      Auditor
+}
+
+// SetAudit wires the audit log and the authenticator used to name the
+// caller on logout. Either may be nil.
+func (h *AuthHandler) SetAudit(authn *Authenticator, auditor Auditor) {
+	h.authn, h.auditor = authn, auditor
 }
 
 func NewAuthHandler(sessionStore SessionStore, cfg *config.Config) *AuthHandler {
@@ -58,6 +66,9 @@ func (h *AuthHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := h.config
 	if cfg.AdminPSK == "" || subtle.ConstantTimeCompare([]byte(req.PSK), []byte(cfg.AdminPSK)) != 1 {
 		slog.Warn("login failed: invalid credentials", "request_id", requestID, "ip", clientIP, "psk_enabled", cfg.AdminPSK != "")
+		if h.auditor != nil {
+			h.auditor.SignInFailed(r, ProviderAdminPSK, "admin", "invalid emergency key")
+		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
@@ -70,6 +81,9 @@ func (h *AuthHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Warn("emergency admin login via ADMIN_PSK", "request_id", requestID, "ip", clientIP)
+	if h.auditor != nil {
+		h.auditor.SignIn(r, &session)
+	}
 	writeJSON(w, http.StatusOK, loginResponse{Status: "ok", IsAdmin: true, Email: session.Email})
 }
 
@@ -84,6 +98,7 @@ func StartSession(w http.ResponseWriter, r *http.Request, store SessionStore, cf
 	if err := store.Create(session); err != nil {
 		return err
 	}
+	session.SessionKey = CookieSessionKey(session.Token)
 	http.SetCookie(w, NewSessionCookie(cfg, session.Token, session.ExpiresAt))
 	return nil
 }
@@ -94,6 +109,11 @@ func (h *AuthHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.auditor != nil && h.authn != nil {
+		if session, err := h.authn.Authenticate(w, r); err == nil {
+			h.auditor.SignOut(r, session)
+		}
+	}
 	if cookie, err := r.Cookie(sessionCookieName(h.config)); err == nil {
 		_ = h.sessionStore.Delete(cookie.Value)
 	}

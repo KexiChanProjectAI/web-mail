@@ -59,7 +59,11 @@ type GoogleHandler struct {
 	provider *oidc.Provider
 	oauth    *oauth2.Config
 	verifier *oidc.IDTokenVerifier
+	auditor  Auditor
 }
+
+// SetAuditor wires the audit log; nil disables it.
+func (h *GoogleHandler) SetAuditor(auditor Auditor) { h.auditor = auditor }
 
 // NewGoogleHandler builds the handler. issuer is GoogleIssuer in production
 // and a fake provider in tests. Discovery happens lazily on first use.
@@ -164,12 +168,16 @@ type googleClaims struct {
 // Callback completes the flow, records the login and starts a session.
 func (h *GoogleHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	requestID := middleware.GetRequestIDFromContext(r.Context())
+	email := ""
 	fail := func(code, reason string, err error) {
 		attrs := []any{"request_id", requestID, "reason", reason}
 		if err != nil {
 			attrs = append(attrs, "error", err.Error())
 		}
 		slog.Warn("google login failed", attrs...)
+		if h.auditor != nil {
+			h.auditor.SignInFailed(r, ProviderGoogle, email, code+": "+reason)
+		}
 		redirectLoginError(w, r, code)
 	}
 	http.SetCookie(w, &http.Cookie{Name: oauthCookieName, Value: "", Path: oauthCookiePath, MaxAge: -1, HttpOnly: true, Secure: secureCookies(h.cfg), SameSite: http.SameSiteLaxMode})
@@ -220,7 +228,7 @@ func (h *GoogleHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		fail(oauthErrFailed, "claims decode", err)
 		return
 	}
-	email := emailaddr.Canonical(claims.Email)
+	email = emailaddr.Canonical(claims.Email)
 	if email == "" || !claims.EmailVerified {
 		fail(oauthErrEmailUnverified, "email missing or unverified", nil)
 		return
@@ -242,6 +250,9 @@ func (h *GoogleHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("login successful", "request_id", requestID, "ip", clientIPFromRequest(r), "provider", ProviderGoogle, "email", email)
+	if h.auditor != nil {
+		h.auditor.SignIn(r, &session)
+	}
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

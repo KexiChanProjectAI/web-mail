@@ -147,7 +147,7 @@ journalctl -u lite-mail -f
 ### Authentication
 
 Configure at least one sign-in method and the bootstrap administrators before starting the service; see [authentication.md](authentication.md).
-Migration `004_create_users_and_mailbox_grants` runs automatically at startup.
+Migrations `004_create_users_and_mailbox_grants` and `005_create_audit_events` run automatically at startup.
 After this upgrade, accounts that used the old shared user key see no mail until an administrator grants them mailboxes.
 
 ## Step 5: Reverse Proxy
@@ -190,6 +190,7 @@ curl https://mail.example.com/healthz
 | `CF_ACCESS_TEAM_DOMAIN` | Cloudflare Zero Trust team name or domain; enables Access JWTs with the AUD | Yes (default sign-in) | (none) | `myteam` |
 | `CF_ACCESS_AUD` | Audience tag of the Cloudflare Access application | With team domain | (none) | `4714c1...` |
 | `ADMIN_PSK` | Emergency admin key; empty disables it | No | (none) | `admin_xyz789...` |
+| `AUDIT_RETENTION_DAYS` | Days to keep audit events; `0` keeps them forever | No | `365` | `365` |
 | `WORKER_INGEST_PSK` | Pre-shared key for Cloudflare Worker | Yes | (none) | `work_ingest_...` |
 | `INGEST_URL` | Worker secret: full URL to Go service ingest endpoint | Yes (Worker) | (none) | `https://mail.example.com/api/ingest` |
 | `SERVER_ADDR` | Listen address for the server | No | `:8080` | `:8080` |

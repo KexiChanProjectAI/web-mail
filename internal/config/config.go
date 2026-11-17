@@ -47,6 +47,9 @@ type Config struct {
 
 	// AdminEmails are always admins, regardless of the users table.
 	AdminEmails []string
+
+	// AuditRetentionDays is how long audit events are kept; 0 keeps them forever.
+	AuditRetentionDays int
 }
 
 // Load reads configuration from environment variables with sensible defaults
@@ -70,6 +73,7 @@ func Load() (*Config, error) {
 		CFAccessAUD:          strings.TrimSpace(getEnv("CF_ACCESS_AUD", "")),
 		AdminEmails:          splitCSV(getEnv("ADMIN_EMAILS", "")),
 		AuthProviders:        splitCSV(getEnv("AUTH_PROVIDERS", DefaultAuthProviders)),
+		AuditRetentionDays:   int(getEnvInt("AUDIT_RETENTION_DAYS", 365)),
 	}
 	if os.Getenv("NORMAL_USER_PSK") != "" {
 		slog.Warn("NORMAL_USER_PSK is set but no longer used; normal users sign in with Google or Cloudflare Access")
@@ -196,6 +200,14 @@ func splitCSV(value string) []string {
 		}
 	}
 	return out
+}
+
+// AuditRetention returns how long audit events are kept (0 = forever).
+func (c *Config) AuditRetention() time.Duration {
+	if c.AuditRetentionDays <= 0 {
+		return 0
+	}
+	return time.Duration(c.AuditRetentionDays) * 24 * time.Hour
 }
 
 // SessionTTL returns the session TTL as a time.Duration.

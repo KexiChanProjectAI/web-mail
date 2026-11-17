@@ -369,6 +369,7 @@ func uniqueMessage(t *testing.T, fixture, subject, recipient string) []byte {
 func cleanDatabase(t *testing.T, database *sql.DB) {
 	t.Helper()
 	for _, query := range []string{
+		"DELETE FROM audit_events",
 		"DELETE FROM mailbox_grants",
 		"DELETE FROM users",
 		"DELETE FROM ingest_events",

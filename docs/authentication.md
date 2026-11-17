@@ -75,6 +75,31 @@ People appear on the **Manage access** page after their first sign-in, with no a
 Administrators can also add an email ahead of time and grant it mailboxes before that person signs in.
 The grant field suggests addresses and domains that have already received mail.
 
+## Audit log
+
+Administrators see an **Audit log** tab next to **Users and grants**.
+It answers who signed in, with which email, when, from which IP, and which mailboxes and messages they opened.
+
+| Event | Recorded when |
+|---|---|
+| Signed in | A new sign-in starts: a new Cloudflare Access session, a Google login, or the emergency key |
+| Sign-in rejected | An Access token fails verification, a Google login fails, or a wrong emergency key is sent |
+| Signed out | The user presses Sign out |
+| Opened inbox | The inbox is listed, at most once per mailbox filter per sign-in every 10 minutes |
+| Read message, Fetched raw source, Downloaded attachment | A message, its raw source or an attachment is served; one row per granted recipient mailbox it was reached through |
+| Access denied | Someone asks for a message or a mailbox filter outside their grants |
+| Added user, Removed user, Changed admin rights, Granted mailbox, Removed mailbox grant | An administrator changes access |
+
+Every row carries the login email, the sign-in method, the client IP and a session key that groups all events of one sign-in; **this sign-in** filters to them.
+The message page loads the raw source for its Source tab, so opening a message also records **Fetched raw source**.
+
+The client IP comes from Cloudflare's `Cf-Connecting-Ip` header, then `X-Forwarded-For`, then the TCP peer.
+lite-mail listens on loopback behind the tunnel, so those headers come from Cloudflare or your own proxy; do not expose the listener directly.
+
+Events are kept for `AUDIT_RETENTION_DAYS` (default 365, `0` keeps them forever) and pruned hourly.
+A failed audit write is logged and does not fail the request, so the audit trail cannot take mail offline.
+Admins can also query `GET /api/admin/audit` with `actor`, `mailbox`, `event`, `session`, `since`, `until` (RFC 3339 or `YYYY-MM-DD`, UTC), `before` (cursor) and `limit`.
+
 ## HTTP endpoints
 
 | Method and path | Purpose |
@@ -85,5 +110,6 @@ The grant field suggests addresses and domains that have already received mail.
 | `POST /api/logout` | Ends the lite-mail session |
 | `GET /api/me` | Signed-in identity, admin flag and grants |
 | `/api/admin/users`, `/api/admin/users/{id}`, `/api/admin/users/{id}/grants[/{grantId}]`, `/api/admin/mailboxes` | User, admin and grant management (administrators only) |
+| `GET /api/admin/audit` | Audit log (administrators only) |
 
 State-changing endpoints accept only same-origin JSON requests, checked through `Sec-Fetch-Site` or `Origin`.

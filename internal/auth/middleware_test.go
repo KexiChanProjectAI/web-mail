@@ -283,3 +283,86 @@ func runRequireAuth(a *Authenticator, prepare func(*http.Request), next http.Han
 func mustFuture() time.Time {
 	return time.Now().Add(time.Hour)
 }
+
+type fakeAuditor struct {
+	signIns  []string
+	failures []string
+	signOuts []string
+}
+
+func (f *fakeAuditor) SignIn(_ *http.Request, s *Session) {
+	f.signIns = append(f.signIns, s.Email+"|"+s.SessionKey)
+}
+func (f *fakeAuditor) SignInFailed(_ *http.Request, provider, email, reason string) {
+	f.failures = append(f.failures, provider+"|"+reason)
+}
+func (f *fakeAuditor) SignOut(_ *http.Request, s *Session) { f.signOuts = append(f.signOuts, s.Email) }
+
+func TestAuthenticatorAuditHooks(t *testing.T) {
+	jwks := jwttest.NewFakeJWKS(t)
+	issuer, aud := "https://team.cloudflareaccess.com", "app-aud"
+	access := NewAccessVerifierWithJWKS(issuer, jwks.JWKSURL(), aud, nil)
+	cfg := testConfig()
+	store := NewCookieSessionStore(cfg.SessionCookieName)
+	a := newAuthenticator(cfg, store, &fakePrincipals{}, access)
+	aud1 := &fakeAuditor{}
+	a.SetAuditor(aud1)
+
+	claims := jwttest.AccessClaims(issuer, aud, "user@example.test")
+	token := jwks.Mint(t, claims)
+	var keys []string
+	for i := 0; i < 2; i++ {
+		runRequireAuth(a, func(r *http.Request) { r.Header.Set(CFAccessHeader, token) },
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				keys = append(keys, SessionFromContext(r.Context()).SessionKey)
+			}))
+	}
+	if len(keys) != 2 || keys[0] == "" || keys[0] != keys[1] || !strings.HasPrefix(keys[0], "cf-") {
+		t.Fatalf("session keys = %v", keys)
+	}
+	if len(aud1.signIns) != 2 {
+		t.Fatalf("SignIn should be offered on every Access request (the logger de-duplicates), got %v", aud1.signIns)
+	}
+
+	claims["iat"] = claims["iat"].(int64) - 3600
+	runRequireAuth(a, func(r *http.Request) { r.Header.Set(CFAccessHeader, jwks.Mint(t, claims)) },
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			keys = append(keys, SessionFromContext(r.Context()).SessionKey)
+		}))
+	if keys[2] == keys[0] {
+		t.Fatal("a new Access sign-in (new iat) must get a new session key")
+	}
+
+	bad := jwttest.AccessClaims(issuer, "other-aud", "user@example.test")
+	runRequireAuth(a, func(r *http.Request) { r.Header.Set(CFAccessHeader, jwks.Mint(t, bad)) },
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	if len(aud1.failures) != 1 || !strings.HasPrefix(aud1.failures[0], "cf_access|") {
+		t.Fatalf("failures = %v", aud1.failures)
+	}
+
+	live := &Session{Email: "cookie@example.test", Provider: ProviderGoogle, ExpiresAt: mustFuture()}
+	_ = store.Create(live)
+	var got *Session
+	runRequireAuth(a, func(r *http.Request) { r.AddCookie(NewSessionCookie(cfg, live.Token, live.ExpiresAt)) },
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = SessionFromContext(r.Context()) }))
+	if got == nil || got.SessionKey != CookieSessionKey(live.Token) || strings.Contains(got.SessionKey, live.Token) {
+		t.Fatalf("cookie session key = %+v", got)
+	}
+}
+
+func TestLogoutAudited(t *testing.T) {
+	cfg := testConfig()
+	store := NewCookieSessionStore(cfg.SessionCookieName)
+	a := newAuthenticator(cfg, store, &fakePrincipals{}, nil)
+	aud1 := &fakeAuditor{}
+	h := NewAuthHandler(store, cfg)
+	h.SetAudit(a, aud1)
+	live := &Session{Email: "out@example.test", Provider: ProviderGoogle, ExpiresAt: mustFuture()}
+	_ = store.Create(live)
+	req := httptest.NewRequest(http.MethodPost, "/api/logout", nil)
+	req.AddCookie(NewSessionCookie(cfg, live.Token, live.ExpiresAt))
+	h.LogoutHandler(httptest.NewRecorder(), req)
+	if len(aud1.signOuts) != 1 || aud1.signOuts[0] != "out@example.test" {
+		t.Fatalf("signOuts = %v", aud1.signOuts)
+	}
+}

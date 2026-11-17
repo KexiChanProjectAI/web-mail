@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"lite-mail/internal/config"
@@ -28,8 +29,12 @@ type Authenticator struct {
 	resolver *Resolver
 	access   *AccessVerifier // nil when Cloudflare Access is not configured
 	logins   LoginRecorder   // may be nil
+	auditor  Auditor         // may be nil
 	now      func() time.Time
 }
+
+// SetAuditor wires the audit log; nil disables it.
+func (a *Authenticator) SetAuditor(auditor Auditor) { a.auditor = auditor }
 
 func NewAuthenticator(sessions SessionStore, cfg *config.Config, resolver *Resolver, access *AccessVerifier, logins LoginRecorder) *Authenticator {
 	return &Authenticator{sessions: sessions, cfg: cfg, resolver: resolver, access: access, logins: logins, now: time.Now}
@@ -51,6 +56,7 @@ func (a *Authenticator) Authenticate(w http.ResponseWriter, r *http.Request) (*S
 			}
 			session.Token = stored.Token
 			session.ExpiresAt = stored.ExpiresAt
+			session.SessionKey = CookieSessionKey(stored.Token)
 			return session, nil
 		}
 	}
@@ -62,6 +68,9 @@ func (a *Authenticator) Authenticate(w http.ResponseWriter, r *http.Request) (*S
 				slog.Warn("cloudflare access token rejected",
 					"request_id", middleware.GetRequestIDFromContext(r.Context()),
 					"error", err.Error())
+				if a.auditor != nil {
+					a.auditor.SignInFailed(r, ProviderCFAccess, "", accessFailureReason(err))
+				}
 				return nil, ErrUnauthenticated
 			}
 			session, rec, err := a.resolver.Resolve(r.Context(), Identity{Email: claims.Email, Provider: ProviderCFAccess})
@@ -69,10 +78,32 @@ func (a *Authenticator) Authenticate(w http.ResponseWriter, r *http.Request) (*S
 				return nil, err
 			}
 			a.stampAccessLogin(r.Context(), claims.Email, rec)
+			session.SessionKey = AccessSessionKey(claims)
+			if a.auditor != nil {
+				a.auditor.SignIn(r, session)
+			}
 			return session, nil
 		}
 	}
 	return nil, ErrUnauthenticated
+}
+
+// accessFailureReason keeps the audit detail short and free of token data.
+func accessFailureReason(err error) string {
+	msg := err.Error()
+	switch {
+	case errors.Is(err, ErrNoAccessEmail):
+		return "token has no email (service token?)"
+	case strings.Contains(msg, "expired"):
+		return "token expired"
+	case strings.Contains(msg, "signature"):
+		return "bad signature"
+	case strings.Contains(msg, "audience") || strings.Contains(msg, "aud"):
+		return "wrong audience"
+	case strings.Contains(msg, "issuer") || strings.Contains(msg, "iss"):
+		return "wrong issuer"
+	}
+	return "invalid token"
 }
 
 func (a *Authenticator) stampAccessLogin(ctx context.Context, email string, rec *PrincipalRecord) {

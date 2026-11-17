@@ -3,11 +3,14 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
+	"lite-mail/internal/audit"
 	"lite-mail/internal/auth"
 	"lite-mail/internal/config"
 	"lite-mail/internal/db"
@@ -21,7 +24,11 @@ const knownMailboxLimit = 200
 type AdminHandler struct {
 	users *db.UserStore
 	cfg   *config.Config
+	log   *audit.Logger
 }
+
+// SetAudit wires the audit log; nil disables it.
+func (h *AdminHandler) SetAudit(l *audit.Logger) { h.log = l }
 
 func NewAdminHandler(users *db.UserStore, cfg *config.Config) *AdminHandler {
 	return &AdminHandler{users: users, cfg: cfg}
@@ -133,6 +140,7 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.audit(r, "user created", "target", email)
+	h.log.Record(r, auth.SessionFromContext(r.Context()), audit.AdminUserCreate, audit.WithDetail("user %s", email))
 	writeJSON(w, http.StatusCreated, h.userDTO(*u, nil))
 }
 
@@ -170,6 +178,11 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.audit(r, "user admin flag changed", "target", u.Email, "is_admin", *req.IsAdmin)
+	role := "removed admin from"
+	if *req.IsAdmin {
+		role = "made admin:"
+	}
+	h.log.Record(r, auth.SessionFromContext(r.Context()), audit.AdminRoleChange, audit.WithDetail("%s %s", role, u.Email))
 	h.writeUser(w, r, id, http.StatusOK)
 }
 
@@ -193,6 +206,7 @@ func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.audit(r, "user deleted", "target", u.Email)
+	h.log.Record(r, auth.SessionFromContext(r.Context()), audit.AdminUserDelete, audit.WithDetail("user %s and their grants", u.Email))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -230,6 +244,8 @@ func (h *AdminHandler) AddGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.audit(r, "grant added", "user_id", id, "pattern", grant.Pattern)
+	h.log.Record(r, auth.SessionFromContext(r.Context()), audit.AdminGrantAdd,
+		audit.WithMailbox(grant.Pattern), audit.WithDetail("granted to %s", h.userEmail(r, id)))
 	writeJSON(w, http.StatusCreated, grantDTO(*g))
 }
 
@@ -243,6 +259,10 @@ func (h *AdminHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	pattern := ""
+	if g, err := h.users.FindGrant(r.Context(), id, grantID); err == nil {
+		pattern = g.Pattern
+	}
 	err := h.users.DeleteGrant(r.Context(), id, grantID)
 	if errors.Is(err, db.ErrGrantNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "grant not found"})
@@ -253,6 +273,8 @@ func (h *AdminHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.audit(r, "grant removed", "user_id", id, "grant_id", grantID)
+	h.log.Record(r, auth.SessionFromContext(r.Context()), audit.AdminGrantRemove,
+		audit.WithMailbox(pattern), audit.WithDetail("removed from %s", h.userEmail(r, id)))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -278,6 +300,63 @@ func (h *AdminHandler) writeUser(w http.ResponseWriter, r *http.Request, id int6
 		return
 	}
 	writeJSON(w, status, h.userDTO(*u, grants))
+}
+
+func (h *AdminHandler) userEmail(r *http.Request, id int64) string {
+	if u, err := h.users.FindUser(r.Context(), id); err == nil {
+		return u.Email
+	}
+	return fmt.Sprintf("user #%d", id)
+}
+
+// ListAudit: GET /api/admin/audit?actor=&mailbox=&event=&session=&since=&until=&before=&limit=
+func (h *AdminHandler) ListAudit(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := audit.Filter{
+		Actor:   strings.TrimSpace(q.Get("actor")),
+		Mailbox: strings.TrimSpace(q.Get("mailbox")),
+		Event:   strings.TrimSpace(q.Get("event")),
+		Session: strings.TrimSpace(q.Get("session")),
+		Limit:   parsePositiveInt(q.Get("limit"), 100),
+	}
+	if f.Event != "" && !slices.Contains(audit.Events, f.Event) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown event"})
+		return
+	}
+	for _, p := range []struct {
+		name string
+		dst  *time.Time
+	}{{"since", &f.Since}, {"until", &f.Until}} {
+		if v := strings.TrimSpace(q.Get(p.name)); v != "" {
+			t, err := parseAuditTime(v)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid " + p.name + ": use RFC 3339 or YYYY-MM-DD"})
+				return
+			}
+			*p.dst = t
+		}
+	}
+	if v := q.Get("before"); v != "" {
+		f.BeforeID = int64(parsePositiveInt(v, 0))
+	}
+	events, err := h.log.List(r.Context(), f)
+	if err != nil {
+		h.internalError(w, r, "list audit", err)
+		return
+	}
+	resp := map[string]any{"events": events, "event_types": audit.Events}
+	if len(events) == f.Limit && f.Limit > 0 {
+		resp["next_before"] = events[len(events)-1].ID
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// parseAuditTime accepts RFC 3339 or a bare UTC date.
+func parseAuditTime(v string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, v); err == nil {
+		return t, nil
+	}
+	return time.Parse("2006-01-02", v)
 }
 
 func (h *AdminHandler) audit(r *http.Request, msg string, attrs ...any) {
