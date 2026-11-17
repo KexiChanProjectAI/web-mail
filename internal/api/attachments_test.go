@@ -18,7 +18,7 @@ func TestGetAttachmentValidIndex(t *testing.T) {
 	messageID := insertMessage(t, f, "alice@example.test", "Attach", "body", []string{"owner@example.test"})
 	insertAttachment(t, f, messageID, "file.txt", "text/plain", []byte("attachment body"))
 
-	rr := serveAttachmentRequest(f.ah.GetAttachment, "/api/messages/"+itoa(messageID)+"/attachments/0", &auth.Session{Email: "owner@example.test"})
+	rr := serveAttachmentRequest(f.ah.GetAttachment, "/api/messages/"+itoa(messageID)+"/attachments/0", grantSession("owner@example.test"))
 	if rr.Code != http.StatusOK || rr.Body.String() != "attachment body" || rr.Header().Get("Content-Type") != "text/plain" {
 		t.Fatalf("attachment response status=%d content-type=%q body=%q", rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
 	}
@@ -29,7 +29,7 @@ func TestGetAttachmentOutOfRangeReturns404(t *testing.T) {
 	messageID := insertMessage(t, f, "alice@example.test", "Attach", "body", []string{"owner@example.test"})
 	insertAttachment(t, f, messageID, "file.txt", "text/plain", []byte("attachment body"))
 
-	rr := serveAttachmentRequest(f.ah.GetAttachment, "/api/messages/"+itoa(messageID)+"/attachments/1", &auth.Session{Email: "owner@example.test"})
+	rr := serveAttachmentRequest(f.ah.GetAttachment, "/api/messages/"+itoa(messageID)+"/attachments/1", grantSession("owner@example.test"))
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rr.Code)
 	}
@@ -40,7 +40,7 @@ func TestGetAttachmentAuthorization(t *testing.T) {
 	messageID := insertMessage(t, f, "alice@example.test", "Attach", "body", []string{"owner@example.test"})
 	insertAttachment(t, f, messageID, "file.txt", "text/plain", []byte("attachment body"))
 
-	if rr := serveAttachmentRequest(f.ah.GetAttachment, "/api/messages/"+itoa(messageID)+"/attachments/0", &auth.Session{Email: "other@example.test"}); rr.Code != http.StatusNotFound {
+	if rr := serveAttachmentRequest(f.ah.GetAttachment, "/api/messages/"+itoa(messageID)+"/attachments/0", grantSession("other@example.test")); rr.Code != http.StatusNotFound {
 		t.Fatalf("other status = %d, want 404", rr.Code)
 	}
 	if rr := serveAttachmentRequest(f.ah.GetAttachment, "/api/messages/"+itoa(messageID)+"/attachments/0", &auth.Session{Email: "admin", IsAdmin: true}); rr.Code != http.StatusOK {
@@ -53,12 +53,12 @@ func TestGetAttachmentContentDispositionSanitizationAndBadID(t *testing.T) {
 	messageID := insertMessage(t, f, "alice@example.test", "Attach", "body", []string{"owner@example.test"})
 	insertAttachment(t, f, messageID, "../bad\r\n\"name.txt", "text/plain", []byte("body"))
 
-	rr := serveAttachmentRequest(f.ah.GetAttachment, "/api/messages/"+itoa(messageID)+"/attachments/0", &auth.Session{Email: "owner@example.test"})
+	rr := serveAttachmentRequest(f.ah.GetAttachment, "/api/messages/"+itoa(messageID)+"/attachments/0", grantSession("owner@example.test"))
 	cd := rr.Header().Get("Content-Disposition")
 	if rr.Code != http.StatusOK || !strings.HasPrefix(cd, "attachment; filename=") || strings.ContainsAny(cd, "\r\n/\\") || strings.Contains(cd, "bad\"") {
 		t.Fatalf("unsafe content-disposition: status=%d cd=%q", rr.Code, cd)
 	}
-	if rr := serveAttachmentRequest(f.ah.GetAttachment, "/api/messages/1/attachments/../x", &auth.Session{Email: "owner@example.test"}); rr.Code != http.StatusNotFound {
+	if rr := serveAttachmentRequest(f.ah.GetAttachment, "/api/messages/1/attachments/../x", grantSession("owner@example.test")); rr.Code != http.StatusNotFound {
 		t.Fatalf("path traversal status = %d, want 404", rr.Code)
 	}
 }

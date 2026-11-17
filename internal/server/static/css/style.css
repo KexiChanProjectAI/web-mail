@@ -349,13 +349,20 @@ select {
 .message-list-item:focus-visible,
 .message-search-clear:focus-visible,
 .form-input:focus-visible,
-.message-search-input:focus-visible {
+.message-search-input:focus-visible,
+.grant-chip-remove:focus-visible,
+.login-emergency-summary:focus-visible,
+.admin-toggle input:focus-visible {
   outline: 3px solid var(--md-sys-color-primary);
   outline-offset: 2px;
 }
 
 .message-search-clear:disabled,
-.message-pagination-button:disabled {
+.message-pagination-button:disabled,
+.primary-button:disabled,
+.secondary-button:disabled,
+.tertiary-button:disabled,
+.grant-chip-remove:disabled {
   opacity: 0.52;
   cursor: not-allowed;
   box-shadow: none;
@@ -871,5 +878,287 @@ select {
 
   .message-pre {
     padding: var(--space-4);
+  }
+}
+
+/* --- Accounts, sign-in methods and access management --- */
+
+.account-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.account-bar:empty {
+  display: none;
+}
+
+.account-identity,
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.account-email {
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  overflow-wrap: anywhere;
+}
+
+.account-admin-chip {
+  background: var(--md-sys-color-tertiary-container);
+  color: var(--md-sys-color-on-tertiary-container);
+}
+
+.login-methods {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.login-provider-button {
+  display: inline-flex;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.login-access-note {
+  margin: 0;
+}
+
+.login-emergency {
+  margin-top: var(--space-5);
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+  padding-top: var(--space-4);
+}
+
+.login-emergency-summary {
+  cursor: pointer;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--type-body-medium);
+}
+
+.login-emergency[open] .login-form {
+  margin-top: var(--space-3);
+}
+
+.form-notice {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--md-shape-corner-md);
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  font-size: var(--type-body-medium);
+}
+
+.mailbox-picker {
+  display: grid;
+  gap: var(--space-1);
+  min-width: min(18rem, 100%);
+}
+
+.mailbox-picker-scope {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.admin-add-user,
+.grant-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.admin-add-user .form-input,
+.grant-form .form-input {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.admin-user-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.admin-user {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-shape-corner-md);
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.admin-user-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.admin-user-identity {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.admin-user-email {
+  overflow-wrap: anywhere;
+}
+
+.admin-user-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.admin-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.admin-toggle input:disabled + span {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.admin-delete {
+  color: var(--md-sys-color-error);
+}
+
+.grant-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.grant-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.3rem 0.35rem 0.3rem 0.75rem;
+  border-radius: var(--md-shape-corner-full);
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  font-size: 0.82rem;
+  font-weight: 600;
+  max-width: 100%;
+}
+
+.grant-chip[data-kind='domain'] {
+  background: var(--md-sys-color-tertiary-container);
+  color: var(--md-sys-color-on-tertiary-container);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--md-sys-color-tertiary) 45%, transparent);
+}
+
+.grant-chip-kind {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.grant-chip-label {
+  overflow-wrap: anywhere;
+}
+
+.grant-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--md-shape-corner-full);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.grant-chip-remove:hover,
+.grant-chip-remove:focus-visible {
+  background: var(--md-sys-state-hover);
+}
+
+.admin-env-note {
+  margin: 0;
+}
+
+.grant-chip-remove:hover:disabled {
+  background: transparent;
+}
+
+@media (pointer: coarse) {
+  .grant-chip-remove {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+}
+
+.inline-error {
+  margin: 0;
+  flex-basis: 100%;
+  color: var(--md-sys-color-error);
+  font-size: var(--type-body-medium);
+}
+
+.admin-intro {
+  margin: 0;
+}
+
+.admin-intro code {
+  font-size: 0.9em;
+}
+
+.admin-section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.mailbox-picker-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.mailbox-picker-row .form-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--type-body-medium);
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+}
+
+@media (max-width: 48rem) {
+  .account-actions .tertiary-button,
+  .admin-user-controls .tertiary-button,
+  .mailbox-picker-row .tertiary-button {
+    width: auto;
   }
 }

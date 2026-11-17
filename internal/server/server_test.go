@@ -57,3 +57,44 @@ func TestCORSRestrictsOrigins(t *testing.T) {
 		}
 	})
 }
+
+func TestAuthRoutesWiring(t *testing.T) {
+	cfg := &config.Config{PublicBaseURL: "https://mail.example.test", AdminPSK: "x"}
+	s := New(cfg, nil)
+
+	get := func(path string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		return rr
+	}
+	if rr := get("/api/auth/providers"); rr.Code != http.StatusOK || rr.Body.String() != "{\"admin_psk\":true,\"cf_access\":false,\"google\":false}\n" {
+		t.Fatalf("providers = %d %q", rr.Code, rr.Body.String())
+	}
+	if rr := get("/api/me"); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("/api/me unauthenticated = %d", rr.Code)
+	}
+	if rr := get("/api/admin/users"); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("/api/admin/users unauthenticated = %d", rr.Code)
+	}
+	if rr := get("/auth/google/start"); rr.Code != http.StatusNotFound {
+		t.Fatalf("google start without config = %d, want 404", rr.Code)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/login", nil)
+	req.Header.Set("Origin", "https://evil.example.test")
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("cross-site login = %d, want 403", rr.Code)
+	}
+}
+
+func TestGoogleRoutesMountedWhenConfigured(t *testing.T) {
+	cfg := &config.Config{PublicBaseURL: "https://mail.example.test", GoogleClientID: "id", GoogleClientSecret: "secret"}
+	s := New(cfg, nil, WithGoogleIssuer("http://127.0.0.1:1", nil))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/auth/google/start", nil))
+	if rr.Code != http.StatusFound || rr.Header().Get("Location") != "/login?error=oauth_failed" {
+		t.Fatalf("google start with unreachable issuer = %d %q", rr.Code, rr.Header().Get("Location"))
+	}
+}

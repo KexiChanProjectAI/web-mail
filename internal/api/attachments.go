@@ -68,17 +68,11 @@ func (h *AttachmentHandler) GetAttachment(w http.ResponseWriter, r *http.Request
 }
 
 func attachmentAuthQuery(session *auth.Session, messageID int64, idx int64) (string, []any) {
-	base := `SELECT a.storage_key, COALESCE(a.original_filename,''), a.mime_type, a.size_bytes
-FROM attachments a JOIN messages m ON m.id = a.message_id
-WHERE a.message_id = ?`
-	args := []any{messageID}
-	if !session.IsAdmin {
-		base += " AND EXISTS (SELECT 1 FROM message_recipients mr WHERE mr.message_id = m.id AND mr.recipient_email = ?)"
-		args = append(args, session.Email)
-	} else {
-	}
-	args = append(args, idx)
-	return base + " ORDER BY a.id LIMIT 1 OFFSET ?", args
+	scope, scopeArgs := scopeClause(session, "")
+	query := `SELECT a.storage_key, COALESCE(a.original_filename,''), a.mime_type, a.size_bytes
+FROM attachments a JOIN messages m ON m.id = a.message_id` + whereClause("a.message_id = ?", scope) + " ORDER BY a.id LIMIT 1 OFFSET ?"
+	args := append([]any{messageID}, scopeArgs...)
+	return query, append(args, idx)
 }
 
 func numericURLParamAllowZero(w http.ResponseWriter, r *http.Request, name string) (int64, bool) {

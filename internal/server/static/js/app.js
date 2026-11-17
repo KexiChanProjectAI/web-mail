@@ -11,11 +11,30 @@ const state = {
   mailboxRequestToken: 0,
   logoutPending: false,
   logoutError: '',
+  me: null,
+  providers: null,
+  selectedMailbox: '',
+  mailboxError: '',
+  admin: null,
 };
 
 const ROUTES = {
   list: '#/',
   messagePrefix: '#/messages/',
+  admin: '#/admin',
+};
+
+const LOGIN_ERRORS = {
+  oauth_denied: 'Google sign-in was cancelled.',
+  oauth_failed: 'Google sign-in did not complete. Please try again.',
+  email_unverified: 'Your Google account email is not verified.',
+  domain_not_allowed: 'This Google account is not from an allowed domain.',
+};
+
+const PROVIDER_LABELS = {
+  google: 'Google',
+  cf_access: 'Cloudflare Access',
+  admin_psk: 'Emergency key',
 };
 
 function ensureAppRoot() {
@@ -85,6 +104,8 @@ function isUnauthorizedError(error) {
 
 function redirectToLogin() {
   resetMailboxState();
+  state.me = null;
+  state.admin = null;
   if (window.location.pathname !== '/login') {
     history.pushState(null, '', '/login');
   }
@@ -131,10 +152,15 @@ async function handleMailboxLogout() {
 
   state.logoutPending = true;
   state.logoutError = '';
-  renderMessageList();
+  const provider = state.me?.provider;
 
   try {
-    await window.API.logout();
+    const result = await window.API.logout();
+    if (provider === 'cf_access' && result?.access_logout) {
+      // The app cannot end a Cloudflare Access session itself; hand over to Access.
+      window.location.assign(result.access_logout);
+      return;
+    }
     redirectToLogin();
   } catch (error) {
     if (isUnauthorizedError(error)) {
@@ -142,72 +168,152 @@ async function handleMailboxLogout() {
     }
 
     state.logoutPending = false;
-    state.logoutError = 'We could not switch mailbox targets right now. Please try again.';
-    renderMessageList();
+    state.logoutError = 'We could not sign you out right now. Please try again.';
+    void handleNavigation();
   }
 }
 
-function renderLogin() {
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) {
+    node.className = className;
+  }
+  if (text !== undefined) {
+    node.textContent = text;
+  }
+  return node;
+}
+
+async function renderLogin() {
   const app = clearApp();
-  app.innerHTML = `
-    <section class="login-shell">
-      <div class="login-layout">
-        <div class="login-hero">
-          <p class="mail-eyebrow">Lite Mail</p>
-          <h1 class="login-title">Private inbox access with a calmer reading surface.</h1>
-          <p class="login-copy">Use your mailbox email address and access key to continue. Existing auth, routes, and state flow remain unchanged.</p>
-          <div class="login-hero-meta" aria-hidden="true">
-            <span class="message-chip login-hero-chip">Focused reading</span>
-            <span class="message-chip login-hero-chip">Safe attachment review</span>
-            <span class="message-chip login-hero-chip">Unchanged routing</span>
-          </div>
-        </div>
-        <section class="panel login-panel" aria-labelledby="login-heading">
-          <div class="login-panel-head">
-            <p class="login-kicker">Sign in</p>
-            <h2 id="login-heading" class="panel-title login-panel-title">Open your mailbox</h2>
-            <p class="muted-copy">Authenticate to read captured mail, inspect attachments, and review raw source safely.</p>
-          </div>
-          <form id="login-form" class="login-form">
-            <label class="form-field" for="psk">
-              <span class="form-field-label">Access key</span>
-              <input class="form-input" type="password" id="psk" name="psk" required autocomplete="current-password">
-            </label>
-            <label class="form-field" for="email">
-              <span class="form-field-label">Email address</span>
-              <input class="form-input" type="email" id="email" name="email" required autocomplete="email">
-            </label>
-            <div id="login-error" class="form-error" hidden role="alert"></div>
-            <button type="submit" class="primary-button form-submit">Sign in</button>
-          </form>
-        </section>
-      </div>
-    </section>
-  `;
-  document.getElementById('login-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const psk = document.getElementById('psk').value;
-    const email = document.getElementById('email').value;
-    const errorEl = document.getElementById('login-error');
-    errorEl.hidden = true;
+  if (!state.providers) {
     try {
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ psk, email }),
-      });
-      if (res.ok) {
-        window.location.href = '/';
-        return;
-      }
-      const data = await res.json().catch(() => ({}));
-      errorEl.textContent = data.error || 'Invalid credentials';
-      errorEl.hidden = false;
-    } catch (err) {
-      errorEl.textContent = 'Connection error';
-      errorEl.hidden = false;
+      state.providers = await window.API.providers();
+    } catch (error) {
+      state.providers = { google: false, cf_access: false, admin_psk: false };
     }
+  }
+  const providers = state.providers;
+  const errorCode = new URLSearchParams(window.location.search).get('error');
+
+  const shell = el('section', 'login-shell');
+  const layout = el('div', 'login-layout');
+
+  const hero = el('div', 'login-hero');
+  hero.append(
+    el('p', 'mail-eyebrow', 'Lite Mail'),
+    el('h1', 'login-title', 'Private inbox access with a calmer reading surface.'),
+    el('p', 'login-copy', 'Sign in with your organisation account. An administrator decides which mailboxes each account can read.'),
+  );
+
+  const panel = el('section', 'panel login-panel');
+  panel.setAttribute('aria-labelledby', 'login-heading');
+  const head = el('div', 'login-panel-head');
+  const heading = el('h2', 'panel-title login-panel-title', 'Sign in');
+  heading.id = 'login-heading';
+  head.append(heading);
+  panel.appendChild(head);
+
+  if (errorCode) {
+    const banner = el('div', 'form-error', LOGIN_ERRORS[errorCode] || 'Sign-in failed. Please try again.');
+    banner.setAttribute('role', 'alert');
+    panel.appendChild(banner);
+  }
+
+  const methods = el('div', 'login-methods');
+  if (providers.google) {
+    const google = createLinkButton('Sign in with Google', '/auth/google/start', 'primary-button login-provider-button');
+    methods.appendChild(google);
+  }
+  if (providers.cf_access) {
+    if (providers.google) {
+      methods.appendChild(el('div', 'login-divider', 'or'));
+    }
+    const access = createLinkButton('Continue with Cloudflare Access', '/', providers.google ? 'secondary-button login-provider-button' : 'primary-button login-provider-button');
+    const note = el('p', 'muted-copy login-access-note',
+      'Cloudflare Zero Trust signs you in with your organisation account and brings you back here.');
+    methods.append(access, note);
+  }
+  if (!providers.google && !providers.cf_access && !providers.admin_psk) {
+    methods.appendChild(el('p', 'muted-copy', 'No sign-in method is configured. Contact the administrator.'));
+  }
+  panel.appendChild(methods);
+
+  if (providers.admin_psk) {
+    const details = el('details', 'login-emergency');
+    details.appendChild(el('summary', 'login-emergency-summary', 'Emergency admin access'));
+    const form = el('form', 'login-form');
+    form.id = 'login-form';
+    const label = el('label', 'form-field');
+    label.setAttribute('for', 'psk');
+    label.appendChild(el('span', 'form-field-label', 'Admin key'));
+    const input = el('input', 'form-input');
+    Object.assign(input, { type: 'password', id: 'psk', name: 'psk', required: true, autocomplete: 'current-password' });
+    label.appendChild(input);
+    const formError = el('div', 'form-error');
+    formError.hidden = true;
+    formError.setAttribute('role', 'alert');
+    const submit = el('button', 'secondary-button form-submit', 'Sign in with admin key');
+    submit.type = 'submit';
+    form.append(label, formError, submit);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      formError.hidden = true;
+      submit.disabled = true;
+      try {
+        await window.API.login(input.value);
+        window.location.assign('/');
+      } catch (err) {
+        formError.textContent = /unauthorized|invalid/i.test(err.message) ? 'That key was not accepted.' : 'Connection error';
+        formError.hidden = false;
+        submit.disabled = false;
+      }
+    });
+    details.appendChild(form);
+    details.addEventListener('toggle', () => {
+      if (details.open) {
+        input.focus();
+      }
+    });
+    panel.appendChild(details);
+  }
+
+  layout.append(hero, panel);
+  shell.appendChild(layout);
+  app.appendChild(shell);
+}
+
+function renderAccountBar() {
+  const me = state.me;
+  const bar = el('div', 'account-bar');
+  if (!me) {
+    return bar;
+  }
+  const who = el('div', 'account-identity');
+  who.append(el('span', 'account-email', me.email));
+  who.append(el('span', 'message-chip account-provider', PROVIDER_LABELS[me.provider] || me.provider));
+  if (me.is_admin) {
+    who.append(el('span', 'message-chip account-admin-chip', 'Admin'));
+  }
+  const actions = el('div', 'account-actions');
+  const onAdmin = window.location.hash === ROUTES.admin;
+  if (me.is_admin) {
+    actions.appendChild(onAdmin
+      ? createButton('Inbox', 'tertiary-button', () => navigateTo(ROUTES.list))
+      : createButton('Manage access', 'tertiary-button', () => navigateTo(ROUTES.admin)));
+  }
+  const signOut = createButton(state.logoutPending ? 'Signing out…' : 'Sign out', 'tertiary-button', () => {
+    void handleMailboxLogout();
   });
+  signOut.disabled = state.logoutPending;
+  actions.appendChild(signOut);
+  bar.append(who, actions);
+  if (state.logoutError) {
+    const error = el('div', 'form-error account-error', state.logoutError);
+    error.setAttribute('role', 'alert');
+    bar.appendChild(error);
+  }
+  return bar;
 }
 
 function renderShell(titleText, subtitleText) {
@@ -230,7 +336,7 @@ function renderShell(titleText, subtitleText) {
   subtitle.className = 'mail-subtitle';
   subtitle.textContent = subtitleText;
 
-  masthead.append(eyebrow, title, subtitle);
+  masthead.append(renderAccountBar(), eyebrow, title, subtitle);
   shell.appendChild(masthead);
   app.appendChild(shell);
   return shell;
@@ -625,9 +731,17 @@ function renderErrorState(titleText, messageText) {
   const shell = renderShell(titleText, 'Please try again in a moment.');
   shell.appendChild(
     renderStatusCard(titleText, messageText, [
-      createButton('Back to mailbox', 'primary-button', () => navigateTo(ROUTES.list)),
+      createButton('Back to mailbox', 'primary-button', goToInbox),
     ]),
   );
+}
+
+function goToInbox() {
+  if (window.location.hash === ROUTES.list) {
+    void handleNavigation();
+    return;
+  }
+  navigateTo(ROUTES.list);
 }
 
 function renderMailboxPagination() {
@@ -676,12 +790,13 @@ async function loadMailboxPage(page = 1, query = '', options = {}) {
   }
 
   try {
-    const payload = await window.API.listMessages(nextPage, state.perPage || 20, nextQuery);
+    const payload = await window.API.listMessages(nextPage, state.perPage || 20, nextQuery, state.selectedMailbox);
     if (requestToken !== state.mailboxRequestToken) {
       return;
     }
 
     syncMailboxState(payload, nextQuery);
+    state.mailboxError = '';
     renderMessageList();
   } catch (error) {
     if (requestToken !== state.mailboxRequestToken) {
@@ -691,11 +806,135 @@ async function loadMailboxPage(page = 1, query = '', options = {}) {
       redirectToLogin();
       return;
     }
+    if (state.selectedMailbox && /not granted/i.test(error.message || '')) {
+      const rejected = state.selectedMailbox;
+      state.selectedMailbox = '';
+      await loadMailboxPage(1, nextQuery);
+      state.mailboxError = `You do not have access to ${rejected}.`;
+      renderMessageList();
+      return;
+    }
     renderErrorState('Mailbox unavailable', 'We could not load the mailbox right now.');
   }
 }
 
+function exactGrantAddresses() {
+  return (state.me?.grants || []).filter((g) => g.kind === 'exact').map((g) => g.pattern);
+}
+
+// renderMailboxPicker lets a user narrow the inbox to one mailbox. Non-admins
+// choose from their exact grants; admins (and users with domain grants) can
+// type any address. Returns null when there is nothing to choose.
+function renderMailboxPicker() {
+  const me = state.me;
+  if (!me) {
+    return null;
+  }
+  const exact = exactGrantAddresses();
+  const hasDomain = (me.grants || []).some((g) => g.kind === 'domain');
+  if (!me.is_admin && !hasDomain && exact.length < 2) {
+    return null;
+  }
+
+  const wrap = el('div', 'mailbox-picker');
+  const label = el('label', 'message-search-label', 'Mailbox');
+  label.setAttribute('for', 'mailbox-picker-input');
+  const apply = (value) => {
+    const next = (value || '').trim().toLowerCase();
+    if (next === state.selectedMailbox) {
+      return;
+    }
+    state.selectedMailbox = next;
+    state.mailboxError = '';
+    void loadMailboxPage(1, state.currentQuery || '');
+  };
+
+  if (!me.is_admin && !hasDomain) {
+    const select = el('select', 'form-input mailbox-picker-select');
+    select.id = 'mailbox-picker-input';
+    select.appendChild(new Option('All my mailboxes', ''));
+    exact.forEach((address) => select.appendChild(new Option(address, address)));
+    select.value = state.selectedMailbox;
+    select.addEventListener('change', () => apply(select.value));
+    wrap.append(label, select);
+    return wrap;
+  }
+
+  const row = el('div', 'mailbox-picker-row');
+  const input = el('input', 'form-input mailbox-picker-input');
+  Object.assign(input, {
+    id: 'mailbox-picker-input',
+    type: 'text',
+    inputMode: 'email',
+    autocomplete: 'off',
+    spellcheck: false,
+    placeholder: me.is_admin ? 'All mailboxes; type an address to filter' : 'All my mailboxes; type an address to filter',
+    value: state.selectedMailbox,
+  });
+  input.setAttribute('list', 'mailbox-picker-options');
+  const options = el('datalist');
+  options.id = 'mailbox-picker-options';
+  exact.forEach((address) => options.appendChild(new Option(address, address)));
+  input.addEventListener('change', () => apply(input.value));
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      apply(input.value);
+    }
+  });
+  row.append(input, options);
+  if (state.selectedMailbox) {
+    const clear = createButton('Show all', 'tertiary-button', () => apply(''));
+    clear.setAttribute('aria-label', 'Show all mailboxes');
+    row.appendChild(clear);
+  }
+  wrap.append(label, row);
+  if (state.mailboxError) {
+    const error = el('p', 'inline-error', state.mailboxError);
+    error.setAttribute('role', 'alert');
+    input.setAttribute('aria-invalid', 'true');
+    wrap.appendChild(error);
+  }
+  if (!me.is_admin) {
+    const scope = el('p', 'section-meta mailbox-picker-scope');
+    scope.textContent = 'You can read: ' + (me.grants || []).map((g) => g.pattern).join(', ');
+    wrap.appendChild(scope);
+  }
+  return wrap;
+}
+
+function renderNoMailboxAssigned(notice = '') {
+  const shell = renderShell('Access pending', 'You are signed in, but no mailbox has been shared with you yet.');
+  const check = createButton('Check again', 'primary-button', async () => {
+    check.disabled = true;
+    try {
+      state.me = (await window.API.me()) || state.me;
+    } catch (error) {
+      // Fall through and re-render with what we have.
+    }
+    if (state.me && (state.me.is_admin || (state.me.grants || []).length > 0)) {
+      await loadMailboxPage(1, '', { showLoading: true });
+      return;
+    }
+    renderNoMailboxAssigned('Still no mailbox. Try again after an administrator confirms.');
+  });
+  const card = renderStatusCard(
+    'No mailbox assigned',
+    `No mailbox has been assigned to ${state.me?.email || 'your account'}. Ask an administrator to grant access, then check again.`,
+    [check],
+  );
+  if (notice) {
+    const status = el('p', 'section-meta', notice);
+    status.setAttribute('role', 'status');
+    card.appendChild(status);
+  }
+  shell.appendChild(card);
+}
+
 function renderMessageList(messages = state.mailbox || []) {
+  if (state.me && !state.me.is_admin && (state.me.grants || []).length === 0) {
+    renderNoMailboxAssigned();
+    return;
+  }
   const shell = renderShell('Inbox', 'Browse, search, and inspect captured mail with a clearer reading hierarchy.');
 
   const listPanel = document.createElement('section');
@@ -716,14 +955,7 @@ function renderMessageList(messages = state.mailbox || []) {
   titleGroup.className = 'section-title-group';
   titleGroup.append(title, summary);
 
-  const switchMailboxButton = createButton(
-    state.logoutPending ? 'Switching mailbox…' : 'Switch mailbox target',
-    'tertiary-button',
-    () => {
-      void handleMailboxLogout();
-    },
-  );
-  switchMailboxButton.disabled = state.logoutPending;
+  const mailboxPicker = renderMailboxPicker();
 
   const searchBlock = document.createElement('div');
   searchBlock.className = 'message-search';
@@ -770,7 +1002,10 @@ function renderMessageList(messages = state.mailbox || []) {
 
   searchField.append(searchInput, clearSearchButton);
   searchBlock.append(searchLabel, searchField);
-  listHeader.append(titleGroup, switchMailboxButton);
+  listHeader.append(titleGroup);
+  if (mailboxPicker) {
+    listHeader.appendChild(mailboxPicker);
+  }
   listPanel.append(listHeader, searchBlock);
 
   if (state.logoutError) {
@@ -798,6 +1033,9 @@ function renderMessageList(messages = state.mailbox || []) {
       queryHighlight.className = 'message-search-query';
       queryHighlight.textContent = `“${state.currentQuery.trim()}”`;
       emptyMessage.append(queryHighlight, '. Try a different phrase.');
+    } else if (state.selectedMailbox) {
+      emptyTitle.textContent = 'No messages for this mailbox';
+      emptyMessage.textContent = `Nothing has arrived for ${state.selectedMailbox} yet.`;
     } else {
       emptyTitle.textContent = 'No messages yet';
       emptyMessage.textContent = 'Incoming mail will appear here as soon as it arrives.';
@@ -882,6 +1120,357 @@ async function showMessageView(messageId) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Admin: users, admin flags and mailbox grants
+// ---------------------------------------------------------------------------
+
+function adminState() {
+  if (!state.admin) {
+    state.admin = { users: [], envAdmins: [], filter: '', error: '', notice: '', busy: false, suggestToken: 0, suggestTimer: null, focus: null };
+  }
+  return state.admin;
+}
+
+function sentenceCase(text) {
+  const value = String(text || '').trim();
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
+async function showAdminPanel() {
+  if (!state.me?.is_admin) {
+    const shell = renderShell('Not available', 'Only administrators can manage access.');
+    shell.appendChild(renderStatusCard('Admins only', 'Your account cannot manage access.', [
+      createButton('Back to mailbox', 'primary-button', goToInbox),
+    ]));
+    return;
+  }
+  renderShell('Manage access', 'Loading users…');
+  await reloadAdminUsers();
+}
+
+async function reloadAdminUsers() {
+  const admin = adminState();
+  try {
+    const payload = await window.API.adminListUsers();
+    admin.users = payload?.users || [];
+    admin.envAdmins = payload?.env_admins || [];
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      redirectToLogin();
+      return;
+    }
+    admin.error = sentenceCase(error.message) || 'Could not load users.';
+  }
+  renderAdminPanel();
+}
+
+// runAdminAction executes a mutation, then refreshes the list and the
+// signed-in user's own view (their grants or admin flag may have changed).
+// When inline is given, a failure is shown next to the control that caused it
+// and the panel is not re-rendered, so typed input and focus survive.
+async function runAdminAction(action, notice, options = {}) {
+  const admin = adminState();
+  const { inline, focus } = options;
+  admin.busy = true;
+  admin.error = '';
+  admin.notice = '';
+  try {
+    await action();
+  } catch (error) {
+    admin.busy = false;
+    if (isUnauthorizedError(error)) {
+      redirectToLogin();
+      return;
+    }
+    const message = sentenceCase(error.message) || 'That did not work.';
+    if (inline) {
+      inline(message);
+      return;
+    }
+    admin.error = message;
+    renderAdminPanel();
+    return;
+  }
+  admin.busy = false;
+  admin.notice = notice || '';
+  admin.focus = focus || null;
+  try {
+    state.me = (await window.API.me()) || state.me;
+  } catch (error) {
+    // Keep the previous identity; the list reload below reports real failures.
+  }
+  if (!state.me?.is_admin) {
+    navigateTo(ROUTES.list);
+    return;
+  }
+  await reloadAdminUsers();
+}
+
+function scheduleMailboxSuggestions(input, datalist) {
+  const admin = adminState();
+  window.clearTimeout(admin.suggestTimer);
+  admin.suggestTimer = window.setTimeout(async () => {
+    const raw = input.value.trim().toLowerCase();
+    const domainOnly = raw.startsWith('*@');
+    const query = domainOnly ? raw.slice(2) : raw;
+    if (!domainOnly && query.length < 2) {
+      return;
+    }
+    const token = ++admin.suggestToken;
+    try {
+      const { addresses = [], domains = [] } = (await window.API.adminMailboxes(query)) || {};
+      if (token !== admin.suggestToken) {
+        return;
+      }
+      const options = domains.map((d) => new Option(`All of ${d}`, `*@${d}`));
+      if (!domainOnly) {
+        options.push(...addresses.map((a) => new Option(a, a)));
+      }
+      datalist.replaceChildren(...options);
+    } catch (error) {
+      // Suggestions are optional; typing a full pattern still works.
+    }
+  }, 250);
+}
+
+function renderGrantChip(user, grant) {
+  const chip = el('span', 'grant-chip');
+  chip.dataset.kind = grant.kind;
+  if (grant.kind === 'domain') {
+    chip.append(el('span', 'grant-chip-kind', 'Domain'));
+  }
+  chip.append(el('span', 'grant-chip-label', grant.pattern));
+  const remove = createButton('×', 'grant-chip-remove', () => {
+    if (!window.confirm(`Remove ${user.email}'s access to ${grant.pattern}?`)) {
+      return;
+    }
+    void runAdminAction(() => window.API.adminDeleteGrant(user.id, grant.id), `Removed ${grant.pattern} from ${user.email}.`,
+      { focus: `grant-input-${user.id}` });
+  });
+  remove.setAttribute('aria-label', `Remove ${grant.pattern} from ${user.email}`);
+  remove.disabled = adminState().busy;
+  chip.appendChild(remove);
+  return chip;
+}
+
+function renderGrantForm(user) {
+  const form = el('form', 'grant-form');
+  const input = el('input', 'form-input grant-input');
+  const listId = `grant-options-${user.id}`;
+  Object.assign(input, { id: `grant-input-${user.id}`, type: 'text', placeholder: 'Address or *@domain', required: true, autocomplete: 'off', spellcheck: false });
+  input.setAttribute('list', listId);
+  input.setAttribute('aria-label', `Grant a mailbox to ${user.email}`);
+  const datalist = el('datalist');
+  datalist.id = listId;
+  const error = el('p', 'inline-error');
+  error.id = `grant-error-${user.id}`;
+  error.hidden = true;
+  error.setAttribute('role', 'alert');
+  input.setAttribute('aria-describedby', error.id);
+  input.addEventListener('input', () => {
+    error.hidden = true;
+    input.removeAttribute('aria-invalid');
+    scheduleMailboxSuggestions(input, datalist);
+  });
+  const submit = el('button', 'secondary-button', 'Grant');
+  submit.type = 'submit';
+  submit.disabled = adminState().busy;
+  submit.setAttribute('aria-label', `Grant mailbox to ${user.email}`);
+  form.append(input, datalist, submit, error);
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const pattern = input.value.trim();
+    if (!pattern) {
+      return;
+    }
+    submit.disabled = true;
+    void runAdminAction(() => window.API.adminAddGrant(user.id, pattern), `Granted ${pattern} to ${user.email}.`, {
+      focus: input.id,
+      inline: (message) => {
+        submit.disabled = false;
+        error.textContent = message;
+        error.hidden = false;
+        input.setAttribute('aria-invalid', 'true');
+        input.focus();
+      },
+    });
+  });
+  return form;
+}
+
+function renderAdminUserRow(user) {
+  const admin = adminState();
+  const isAdmin = user.is_admin || user.is_env_admin;
+  const isSelf = user.email === state.me?.email;
+  const row = el('article', 'admin-user');
+  const head = el('div', 'admin-user-head');
+  const identity = el('div', 'admin-user-identity');
+  const email = el('strong', 'admin-user-email', isSelf ? `${user.email} (you)` : user.email);
+  email.id = `admin-user-${user.id}`;
+  row.setAttribute('aria-labelledby', email.id);
+  identity.append(email);
+  const lastLogin = user.last_login_at
+    ? `Last sign-in ${formatDate(user.last_login_at)} via ${PROVIDER_LABELS[user.last_login_provider] || user.last_login_provider}`
+    : 'Never signed in';
+  identity.append(el('span', 'section-meta', lastLogin));
+
+  const controls = el('div', 'admin-user-controls');
+  const toggleLabel = el('label', 'admin-toggle');
+  const toggle = el('input');
+  toggle.type = 'checkbox';
+  toggle.id = `admin-toggle-${user.id}`;
+  toggle.checked = isAdmin;
+  toggle.disabled = admin.busy || user.is_env_admin;
+  toggle.setAttribute('aria-label', `${user.email} is an administrator`);
+  toggle.addEventListener('change', () => {
+    const next = toggle.checked;
+    const question = next
+      ? `Make ${user.email} an administrator? They will be able to read every mailbox and manage access.`
+      : isSelf
+        ? 'Remove your own administrator rights? You will lose access to this page.'
+        : `Remove administrator rights from ${user.email}?`;
+    if (!window.confirm(question)) {
+      toggle.checked = !next;
+      return;
+    }
+    void runAdminAction(() => window.API.adminSetAdmin(user.id, next), `${user.email} is ${next ? 'now' : 'no longer'} an administrator.`,
+      { focus: toggle.id });
+  });
+  toggleLabel.append(toggle, el('span', '', user.is_env_admin ? 'Admin (set by ADMIN_EMAILS)' : 'Admin'));
+
+  const remove = createButton('Remove', 'tertiary-button admin-delete', () => {
+    if (!window.confirm(`Remove ${user.email} and all of their mailbox grants?\n\nThis does not block sign-in: if they sign in again they reappear here with no access.`)) {
+      return;
+    }
+    void runAdminAction(() => window.API.adminDeleteUser(user.id), `Removed ${user.email}.`);
+  });
+  remove.setAttribute('aria-label', `Remove ${user.email}`);
+  remove.disabled = admin.busy || user.is_env_admin || isSelf;
+  if (user.is_env_admin || isSelf) {
+    remove.title = isSelf ? 'You cannot remove yourself.' : 'Set by ADMIN_EMAILS; change the server configuration instead.';
+  }
+  controls.append(toggleLabel, remove);
+  head.append(identity, controls);
+  row.appendChild(head);
+
+  const grants = el('div', 'grant-list');
+  if (isAdmin) {
+    grants.append(el('span', 'section-meta', 'Administrators can read every mailbox.'));
+  }
+  (user.grants || []).forEach((grant) => grants.appendChild(renderGrantChip(user, grant)));
+  if (!isAdmin && (user.grants || []).length === 0) {
+    grants.append(el('span', 'section-meta grant-empty', 'No mailbox access yet.'));
+  }
+  row.appendChild(grants);
+  // Admins read everything; only offer the grant form when it changes something
+  // (or when grants already exist and should stay editable after a demotion).
+  if (!isAdmin || (user.grants || []).length > 0) {
+    row.appendChild(renderGrantForm(user));
+  }
+  return row;
+}
+
+function renderAdminPanel() {
+  const admin = adminState();
+  const shell = renderShell('Manage access', 'Choose which mailboxes each signed-in account can read.');
+
+  const panel = el('section', 'panel admin-panel');
+  const header = el('div', 'message-list-header');
+  const titleGroup = el('div', 'section-title-group');
+  const intro = el('p', 'section-meta admin-intro');
+  intro.append('Grant an exact address such as ');
+  intro.append(el('code', '', 'alice@example.com'));
+  intro.append(' or a whole domain such as ');
+  intro.append(el('code', '', '*@example.com'));
+  intro.append('. People appear here after their first sign-in. Changes apply immediately.');
+  titleGroup.append(el('h2', 'panel-title', 'Users'), intro);
+  header.appendChild(titleGroup);
+  panel.appendChild(header);
+
+  if (admin.error) {
+    const error = el('div', 'form-error', admin.error);
+    error.setAttribute('role', 'alert');
+    panel.appendChild(error);
+  }
+  if (admin.notice) {
+    const notice = el('div', 'form-notice', admin.notice);
+    notice.setAttribute('role', 'status');
+    panel.appendChild(notice);
+  }
+
+  const addSection = el('div', 'admin-section');
+  const addLabel = el('label', 'message-search-label', 'Add a user before they sign in');
+  addLabel.setAttribute('for', 'admin-add-email');
+  const addForm = el('form', 'admin-add-user');
+  const addInput = el('input', 'form-input');
+  Object.assign(addInput, { id: 'admin-add-email', type: 'email', placeholder: 'person@example.com', required: true, autocomplete: 'off' });
+  const addError = el('p', 'inline-error');
+  addError.hidden = true;
+  addError.setAttribute('role', 'alert');
+  const addButton = el('button', 'primary-button', 'Add user');
+  addButton.type = 'submit';
+  addButton.disabled = admin.busy;
+  addForm.append(addInput, addButton, addError);
+  addInput.addEventListener('input', () => { addError.hidden = true; });
+  addForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const email = addInput.value.trim();
+    if (!email) {
+      return;
+    }
+    addButton.disabled = true;
+    void runAdminAction(() => window.API.adminCreateUser(email), `Added ${email}. Grant a mailbox below.`, {
+      inline: (message) => {
+        addButton.disabled = false;
+        addError.textContent = message;
+        addError.hidden = false;
+        addInput.focus();
+      },
+    });
+  });
+  addSection.append(addLabel, addForm);
+
+  const filterSection = el('div', 'admin-section');
+  const filterLabel = el('label', 'message-search-label', 'Find a user or mailbox');
+  filterLabel.setAttribute('for', 'admin-filter');
+  const filter = el('input', 'message-search-input admin-filter');
+  Object.assign(filter, { id: 'admin-filter', type: 'search', placeholder: 'Filter users…', value: admin.filter });
+  filterSection.append(filterLabel, filter);
+  panel.append(addSection, filterSection);
+
+  const list = el('div', 'admin-user-list');
+  const renderRows = () => {
+    const needle = admin.filter.trim().toLowerCase();
+    const rows = admin.users.filter((u) => !needle || u.email.includes(needle)
+      || (u.grants || []).some((g) => g.pattern.includes(needle)));
+    list.replaceChildren(...rows.map(renderAdminUserRow));
+    if (rows.length === 0) {
+      list.appendChild(el('p', 'muted-copy', admin.users.length ? 'No users match the filter.' : 'No users yet.'));
+    }
+  };
+  filter.addEventListener('input', () => {
+    admin.filter = filter.value;
+    renderRows();
+  });
+  renderRows();
+  panel.appendChild(list);
+
+  if (admin.envAdmins.length > 0) {
+    const env = el('p', 'section-meta admin-env-note');
+    env.textContent = `Also administrators via ADMIN_EMAILS (not signed in yet): ${admin.envAdmins.join(', ')}`;
+    panel.appendChild(env);
+  }
+
+  shell.appendChild(panel);
+
+  const focusId = admin.focus;
+  admin.focus = null;
+  const target = focusId && document.getElementById(focusId);
+  if (target) {
+    target.focus();
+  }
+}
+
 function parseRoute(hashValue) {
   const hash = hashValue || ROUTES.list;
   if (hash === '' || hash === '#') {
@@ -889,6 +1478,9 @@ function parseRoute(hashValue) {
   }
   if (hash === ROUTES.list) {
     return { type: 'list' };
+  }
+  if (hash === ROUTES.admin) {
+    return { type: 'admin' };
   }
   if (hash.startsWith(ROUTES.messagePrefix)) {
     const messageId = decodeURIComponent(hash.slice(ROUTES.messagePrefix.length)).trim();
@@ -900,7 +1492,15 @@ function parseRoute(hashValue) {
 }
 
 async function handleNavigation() {
+  if (!state.me) {
+    await renderLogin();
+    return;
+  }
   const route = parseRoute(window.location.hash);
+  if (route.type === 'admin') {
+    await showAdminPanel();
+    return;
+  }
   if (route.type === 'message') {
     await showMessageView(route.messageId);
     return;
@@ -912,17 +1512,26 @@ async function handleNavigation() {
   renderMessageNotFound();
 }
 
-function boot() {
+async function boot() {
   ensureAppRoot();
   window.addEventListener('lite-mail:unauthorized', redirectToLogin);
   window.addEventListener('hashchange', handleNavigation);
-  void handleNavigation();
+  try {
+    state.me = await window.API.me();
+  } catch (error) {
+    renderErrorState('Service unavailable', 'We could not reach the mail service. Please reload the page.');
+    return;
+  }
+  if (state.me && window.location.pathname === '/login') {
+    history.replaceState(null, '', '/' + window.location.hash);
+  }
+  await handleNavigation();
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', boot, { once: true });
+  document.addEventListener('DOMContentLoaded', () => void boot(), { once: true });
 } else {
-  boot();
+  void boot();
 }
 
 window.liteMailApp = {

@@ -14,7 +14,7 @@ func TestE2E_FullFlow(t *testing.T) {
 
 	raw := uniqueMessage(t, "simple-text.eml", "E2E Full Flow", "recipient@example.com")
 	messageID := ingestRaw(t, suite, raw)
-	cookies := login(t, suite, AdminPSK, "")
+	cookies := login(t, suite, AdminPSK)
 
 	listResp := getWithCookies(t, suite, "/api/messages", cookies)
 	list := decodeJSON[listResponse](t, listResp)
@@ -46,7 +46,7 @@ func TestE2E_NormalUserFlow(t *testing.T) {
 
 	userMessageID := ingestRaw(t, suite, uniqueMessage(t, "simple-text.eml", "User Visible", "user@example.com"))
 	otherMessageID := ingestRaw(t, suite, uniqueMessage(t, "simple-text.eml", "Other Hidden", "other@example.com"))
-	cookies := login(t, suite, NormalUserPSK, "user@example.com")
+	cookies := asUser(t, suite, "user@example.com", "user@example.com")
 
 	listResp := getWithCookies(t, suite, "/api/messages", cookies)
 	list := decodeJSON[listResponse](t, listResp)

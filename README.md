@@ -1,6 +1,7 @@
 # lite-mail
 
-PSK-based email service with Go server and Cloudflare Worker.
+Receive-only web mail with a Go server and Cloudflare Worker.
+People sign in through Cloudflare Access (Zero Trust) by default, with Google as an opt-in, and administrators decide which mailboxes each account may read; see [docs/authentication.md](docs/authentication.md).
 
 ## Commands
 
@@ -32,8 +33,12 @@ Copy `.env.example` to `.env` and configure:
 - `MAX_MESSAGE_BYTES` - Max message size (default 26214400)
 - `SESSION_COOKIE_NAME` - Session cookie name
 - `SESSION_TTL_HOURS` - Session TTL in hours
-- `NORMAL_USER_PSK` - PSK for normal users
-- `ADMIN_PSK` - PSK for admin access
+- `AUTH_PROVIDERS` - Enabled sign-in methods, default `cf_access`; add `google` to opt in
+- `ADMIN_EMAILS` - Comma-separated emails that are always administrators
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - Google sign-in, used only when `AUTH_PROVIDERS` lists `google`
+- `GOOGLE_ALLOWED_DOMAINS` - Optional email domains allowed to sign in with Google
+- `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` - Accept Cloudflare Access (Zero Trust) JWTs
+- `ADMIN_PSK` - Optional emergency admin key; leave empty to disable
 - `WORKER_INGEST_PSK` - PSK for worker ingest endpoint
 ## Worker-owned Telegram forwarding
 

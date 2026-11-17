@@ -12,7 +12,7 @@ func TestDownloadAttachment(t *testing.T) {
 	defer TeardownSuite(suite)
 
 	messageID := ingestRaw(t, suite, uniqueMessage(t, "attachment-multipart.eml", "Attachment Download", "recipient@example.com"))
-	cookies := login(t, suite, AdminPSK, "")
+	cookies := login(t, suite, AdminPSK)
 	resp := getWithCookies(t, suite, fmt.Sprintf("/api/messages/%d/attachments/0", messageID), cookies)
 	body := assertStatus(t, resp, http.StatusOK)
 	if resp.Header.Get("Content-Type") != "text/plain" {
@@ -31,7 +31,7 @@ func TestDownloadAttachment_NotFound(t *testing.T) {
 	defer TeardownSuite(suite)
 
 	messageID := ingestRaw(t, suite, uniqueMessage(t, "attachment-multipart.eml", "Attachment Missing", "recipient@example.com"))
-	cookies := login(t, suite, AdminPSK, "")
+	cookies := login(t, suite, AdminPSK)
 	resp := getWithCookies(t, suite, fmt.Sprintf("/api/messages/%d/attachments/99", messageID), cookies)
 	assertStatus(t, resp, http.StatusNotFound)
 }
@@ -41,7 +41,7 @@ func TestDownloadAttachment_Unauthorized(t *testing.T) {
 	defer TeardownSuite(suite)
 
 	messageID := ingestRaw(t, suite, uniqueMessage(t, "attachment-multipart.eml", "Private Attachment", "owner@example.com"))
-	cookies := login(t, suite, NormalUserPSK, "other@example.com")
+	cookies := asUser(t, suite, "other@example.com", "other@example.com")
 	resp := getWithCookies(t, suite, fmt.Sprintf("/api/messages/%d/attachments/0", messageID), cookies)
 	assertStatus(t, resp, http.StatusNotFound)
 }

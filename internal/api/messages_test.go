@@ -47,7 +47,7 @@ func TestListMessagesPaginationDefaultsAndLimits(t *testing.T) {
 	insertMessage(t, f, "alice@example.test", "One", "body one", []string{"user@example.test"})
 	insertMessage(t, f, "bob@example.test", "Two", "body two", []string{"user@example.test"})
 
-	rr := serveMessageRequest(f.mh.ListMessages, "/api/messages", &auth.Session{Email: "user@example.test"})
+	rr := serveMessageRequest(f.mh.ListMessages, "/api/messages", grantSession("user@example.test"))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
 	}
@@ -64,7 +64,7 @@ func TestListMessagesPaginationDefaultsAndLimits(t *testing.T) {
 		t.Fatalf("unexpected list response: %+v", got)
 	}
 
-	rr = serveMessageRequest(f.mh.ListMessages, "/api/messages?per_page=1000", &auth.Session{Email: "user@example.test"})
+	rr = serveMessageRequest(f.mh.ListMessages, "/api/messages?per_page=1000", grantSession("user@example.test"))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
 	}
@@ -85,7 +85,7 @@ func TestListMessagesSearchQuery(t *testing.T) {
 	insertMessage(t, f, "alice@example.test", "FindMe", "uniquealpha searchable", []string{"user@example.test"})
 	insertMessage(t, f, "bob@example.test", "Other", "ordinary text", []string{"user@example.test"})
 
-	rr := serveMessageRequest(f.mh.ListMessages, "/api/messages?q=uniquealpha", &auth.Session{Email: "user@example.test"})
+	rr := serveMessageRequest(f.mh.ListMessages, "/api/messages?q=uniquealpha", grantSession("user@example.test"))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
 	}
@@ -105,7 +105,7 @@ func TestListMessagesIgnoresOperatorOnlySearchQuery(t *testing.T) {
 	insertMessage(t, f, "alice@example.test", "One", "body one", []string{"user@example.test"})
 	insertMessage(t, f, "bob@example.test", "Two", "body two", []string{"user@example.test"})
 
-	rr := serveMessageRequest(f.mh.ListMessages, "/api/messages?q=%2B", &auth.Session{Email: "user@example.test"})
+	rr := serveMessageRequest(f.mh.ListMessages, "/api/messages?q=%2B", grantSession("user@example.test"))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
 	}
@@ -126,10 +126,10 @@ func TestGetMessageAuthorization(t *testing.T) {
 	f := newAPIFixture(t)
 	id := insertMessage(t, f, "alice@example.test", "Private", "body", []string{"owner@example.test"})
 
-	if rr := serveMessageRequest(f.mh.GetMessage, "/api/messages/"+itoa(id), &auth.Session{Email: "owner@example.test"}); rr.Code != http.StatusOK {
+	if rr := serveMessageRequest(f.mh.GetMessage, "/api/messages/"+itoa(id), grantSession("owner@example.test")); rr.Code != http.StatusOK {
 		t.Fatalf("owner status = %d", rr.Code)
 	}
-	if rr := serveMessageRequest(f.mh.GetMessage, "/api/messages/"+itoa(id), &auth.Session{Email: "other@example.test"}); rr.Code != http.StatusNotFound {
+	if rr := serveMessageRequest(f.mh.GetMessage, "/api/messages/"+itoa(id), grantSession("other@example.test")); rr.Code != http.StatusNotFound {
 		t.Fatalf("other status = %d, want 404", rr.Code)
 	}
 	if rr := serveMessageRequest(f.mh.GetMessage, "/api/messages/"+itoa(id), &auth.Session{Email: "admin", IsAdmin: true}); rr.Code != http.StatusOK {
@@ -141,14 +141,14 @@ func TestGetRawMIMEAuthorizationContentTypeAndBadID(t *testing.T) {
 	f := newAPIFixture(t)
 	id := insertMessage(t, f, "alice@example.test", "Raw", "body", []string{"owner@example.test"})
 
-	rr := serveMessageRequest(f.mh.GetRawMIME, "/api/messages/"+itoa(id)+"/raw", &auth.Session{Email: "owner@example.test"})
+	rr := serveMessageRequest(f.mh.GetRawMIME, "/api/messages/"+itoa(id)+"/raw", grantSession("owner@example.test"))
 	if rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != "message/rfc822" || rr.Body.String() == "" {
 		t.Fatalf("raw response status=%d content-type=%q body=%q", rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
 	}
-	if rr := serveMessageRequest(f.mh.GetRawMIME, "/api/messages/"+itoa(id)+"/raw", &auth.Session{Email: "other@example.test"}); rr.Code != http.StatusNotFound {
+	if rr := serveMessageRequest(f.mh.GetRawMIME, "/api/messages/"+itoa(id)+"/raw", grantSession("other@example.test")); rr.Code != http.StatusNotFound {
 		t.Fatalf("other status = %d, want 404", rr.Code)
 	}
-	if rr := serveMessageRequest(f.mh.GetRawMIME, "/api/messages/../raw", &auth.Session{Email: "owner@example.test"}); rr.Code != http.StatusNotFound {
+	if rr := serveMessageRequest(f.mh.GetRawMIME, "/api/messages/../raw", grantSession("owner@example.test")); rr.Code != http.StatusNotFound {
 		t.Fatalf("path traversal status = %d, want 404", rr.Code)
 	}
 }
@@ -191,7 +191,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, 'success')`, hash, hash, sender, subject, ti
 	}
 	id, _ := res.LastInsertId()
 	for _, recipient := range recipients {
-		mustExec(t, f.db, "INSERT INTO message_recipients (message_id, recipient_email, recipient_type) VALUES (?, ?, 'to')", id, recipient)
+		mustExec(t, f.db, "INSERT INTO message_recipients (message_id, recipient_email, recipient_type, received_at) VALUES (?, ?, 'to', ?)", id, recipient, time.Now())
 	}
 	return id
 }
@@ -204,3 +204,63 @@ func mustExec(t *testing.T, db *sql.DB, query string, args ...any) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// grantSession is a non-admin session with an exact grant for each address.
+func grantSession(email string, more ...string) *auth.Session {
+	return &auth.Session{Email: email, Provider: auth.ProviderGoogle, Grants: auth.ParseGrants(append([]string{email}, more...))}
+}
+
+func TestListMessagesGrantScoping(t *testing.T) {
+	f := newAPIFixture(t)
+	insertMessage(t, f, "s@x.test", "Exact", "b", []string{"box@example.test"})
+	insertMessage(t, f, "s@x.test", "Domain", "b", []string{"any@example.org"})
+	insertMessage(t, f, "s@x.test", "Hidden", "b", []string{"nobody@example.net"})
+
+	list := func(session *auth.Session, query string) (int, []string) {
+		rr := serveMessageRequest(f.mh.ListMessages, "/api/messages"+query, session)
+		if rr.Code != http.StatusOK {
+			return rr.Code, nil
+		}
+		var got struct {
+			Messages []messageDTO `json:"messages"`
+			Total    int          `json:"total"`
+		}
+		_ = json.Unmarshal(rr.Body.Bytes(), &got)
+		var subjects []string
+		for _, m := range got.Messages {
+			subjects = append(subjects, m.Subject)
+		}
+		return rr.Code, subjects
+	}
+
+	mixed := &auth.Session{Email: "u@x.test", Grants: auth.ParseGrants([]string{"box@example.test", "*@example.org"})}
+	if code, got := list(mixed, ""); code != 200 || len(got) != 2 {
+		t.Fatalf("mixed grants: code=%d subjects=%v", code, got)
+	}
+	if code, got := list(mixed, "?mailbox=any@example.org"); code != 200 || len(got) != 1 || got[0] != "Domain" {
+		t.Fatalf("mailbox filter: code=%d subjects=%v", code, got)
+	}
+	if code, _ := list(mixed, "?mailbox=nobody@example.net"); code != http.StatusForbidden {
+		t.Fatalf("ungranted mailbox filter: code=%d, want 403", code)
+	}
+	none := &auth.Session{Email: "u@x.test"}
+	if code, got := list(none, ""); code != 200 || len(got) != 0 {
+		t.Fatalf("no grants: code=%d subjects=%v", code, got)
+	}
+	admin := &auth.Session{Email: "admin", IsAdmin: true}
+	if code, got := list(admin, ""); code != 200 || len(got) != 3 {
+		t.Fatalf("admin: code=%d subjects=%v", code, got)
+	}
+	if code, got := list(admin, "?mailbox=nobody@example.net"); code != 200 || len(got) != 1 {
+		t.Fatalf("admin filter: code=%d subjects=%v", code, got)
+	}
+}
+
+func TestDomainGrantDoesNotMatchLookalikes(t *testing.T) {
+	f := newAPIFixture(t)
+	id := insertMessage(t, f, "s@x.test", "Lookalike", "b", []string{"a@notexample.org", "b@example.org.evil"})
+	session := &auth.Session{Email: "u@x.test", Grants: auth.ParseGrants([]string{"*@example.org"})}
+	if rr := serveMessageRequest(f.mh.GetMessage, "/api/messages/"+itoa(id), session); rr.Code != http.StatusNotFound {
+		t.Fatalf("lookalike domain status = %d, want 404", rr.Code)
+	}
+}

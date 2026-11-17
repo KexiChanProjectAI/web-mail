@@ -90,8 +90,11 @@ PUBLIC_BASE_URL=https://mail.example.com
 MAX_MESSAGE_BYTES=26214400
 SESSION_COOKIE_NAME=lite_mail_session
 SESSION_TTL_HOURS=24
-NORMAL_USER_PSK=your_normal_user_psk
-ADMIN_PSK=your_admin_psk
+AUTH_PROVIDERS=cf_access
+CF_ACCESS_TEAM_DOMAIN=your_team
+CF_ACCESS_AUD=your_access_application_aud_tag
+ADMIN_EMAILS=you@example.com
+ADMIN_PSK=
 WORKER_INGEST_PSK=your_worker_ingest_psk
 INGEST_URL=https://mail.example.com/api/ingest
 APP_ENV=production
@@ -141,6 +144,12 @@ systemctl status lite-mail
 journalctl -u lite-mail -f
 ```
 
+### Authentication
+
+Configure at least one sign-in method and the bootstrap administrators before starting the service; see [authentication.md](authentication.md).
+Migration `004_create_users_and_mailbox_grants` runs automatically at startup.
+After this upgrade, accounts that used the old shared user key see no mail until an administrator grants them mailboxes.
+
 ## Step 5: Reverse Proxy
 
 See [reverse-proxy.md](reverse-proxy.md) for Caddy and nginx configuration examples.
@@ -160,7 +169,7 @@ curl https://mail.example.com/healthz
 ### Test Email Flow
 
 1. Send an email to `test@your-domain.com` (must be configured as catch-all in Cloudflare Email Routing)
-2. Login to the web interface
+2. Sign in to the web interface as an administrator (an `ADMIN_EMAILS` address)
 3. Verify the message appears
 
 ## Environment Variables Reference
@@ -173,8 +182,14 @@ curl https://mail.example.com/healthz
 | `MAX_MESSAGE_BYTES` | Maximum email size in bytes | No | `26214400` (25 MiB) | `26214400` |
 | `SESSION_COOKIE_NAME` | Session cookie name | No | `lite_mail_session` | `lite_mail_session` |
 | `SESSION_TTL_HOURS` | Session lifetime in hours | No | `24` | `24` |
-| `NORMAL_USER_PSK` | Pre-shared key for normal users | Yes | (none) | `norm_abc123...` |
-| `ADMIN_PSK` | Pre-shared key for admin access | Yes | (none) | `admin_xyz789...` |
+| `AUTH_PROVIDERS` | Enabled sign-in methods: `cf_access` and/or `google` | No | `cf_access` | `cf_access` |
+| `ADMIN_EMAILS` | Comma-separated emails that are always administrators | Recommended | (none) | `you@example.com` |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID; used only when `AUTH_PROVIDERS` lists `google` | No | (none) | `123-abc.apps.googleusercontent.com` |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | With client ID | (none) | `GOCSPX-...` |
+| `GOOGLE_ALLOWED_DOMAINS` | Comma-separated email domains allowed to sign in with Google | No | (any verified account) | `example.com` |
+| `CF_ACCESS_TEAM_DOMAIN` | Cloudflare Zero Trust team name or domain; enables Access JWTs with the AUD | Yes (default sign-in) | (none) | `myteam` |
+| `CF_ACCESS_AUD` | Audience tag of the Cloudflare Access application | With team domain | (none) | `4714c1...` |
+| `ADMIN_PSK` | Emergency admin key; empty disables it | No | (none) | `admin_xyz789...` |
 | `WORKER_INGEST_PSK` | Pre-shared key for Cloudflare Worker | Yes | (none) | `work_ingest_...` |
 | `INGEST_URL` | Worker secret: full URL to Go service ingest endpoint | Yes (Worker) | (none) | `https://mail.example.com/api/ingest` |
 | `SERVER_ADDR` | Listen address for the server | No | `:8080` | `:8080` |
@@ -189,7 +204,7 @@ lite-mail has the following limitations by design:
 - **No labels, folders, or threading**: Messages are organized by recipient email and date only.
 - **No read/unread state**: All messages are treated equally.
 - **No message deletion UI**: Messages are retained for the lifetime of the mailbox. Database-level cleanup is an administrative task.
-- **No multi-user accounts**: Each PSK provides access to a single mailbox (normal) or all mailboxes (admin).
+- **No passwords**: People sign in with Google or Cloudflare Access, and administrators grant each account the mailboxes it may read. See [authentication.md](authentication.md).
 - **No real-time notifications**: The UI requires a page refresh to see new messages.
 - **No attachment preview**: Attachments can only be downloaded, not previewed inline.
 
