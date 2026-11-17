@@ -110,6 +110,9 @@ wrangler secret list
 
 **Never commit real secrets to version control.** The `wrangler.toml` uses placeholders only.
 
+> If the web interface sits behind Cloudflare Access, add a Bypass policy for `/api/ingest`, or the Worker's POST is redirected to the Access login.
+> See [authentication.md](authentication.md#cloudflare-access).
+
 ## Ingest Endpoint Protocol
 
 ### Request

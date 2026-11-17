@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"lite-mail/internal/emailaddr"
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
@@ -270,5 +271,5 @@ func htmlToText(s string) string {
 }
 
 func canonicalEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
+	return emailaddr.Canonical(email)
 }

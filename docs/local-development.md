@@ -86,10 +86,18 @@ Navigate to **http://localhost:8080** to access the lite-mail interface.
 | `MAX_MESSAGE_BYTES` | No | `26214400` | Maximum message size in bytes (~25MB) |
 | `SESSION_COOKIE_NAME` | No | `lite_mail_session` | Name of the session cookie |
 | `SESSION_TTL_HOURS` | No | `24` | Session time-to-live in hours |
-| `NORMAL_USER_PSK` | Yes | - | Pre-shared key for normal user authentication |
-| `ADMIN_PSK` | Yes | - | Pre-shared key for admin access |
+| `ADMIN_PSK` | No | - | Emergency admin key; the simplest way to sign in locally |
+| `ADMIN_EMAILS` | No | - | Comma-separated emails that are always administrators |
+| `AUTH_PROVIDERS` | No | `cf_access` | Enabled sign-in methods; add `google` to use Google |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | No | - | Google sign-in when listed; register `http://localhost:8080/auth/google/callback` as a redirect URI |
+| `GOOGLE_ALLOWED_DOMAINS` | No | - | Restrict Google sign-in to these email domains |
+| `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` | No | - | Accept Cloudflare Access JWTs |
 | `WORKER_INGEST_PSK` | Yes | - | Pre-shared key for Worker ingest endpoint |
 | `INGEST_URL` | Yes | - | Full URL to Go service ingest endpoint (e.g., `http://localhost:8080/api/ingest`) |
+
+At least one usable method must be set: `ADMIN_PSK` is the simplest locally, since Cloudflare Access needs a real Access application.
+Set `APP_ENV=development` locally so cookies work over plain `http://`.
+See [authentication.md](authentication.md) for how sign-in and mailbox grants work.
 
 ## Database Setup
 

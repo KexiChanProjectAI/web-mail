@@ -1,11 +1,13 @@
 module lite-mail
 
-go 1.25.0
+go 1.26.0
 
 require (
+	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-sql-driver/mysql v1.10.0
 	golang.org/x/net v0.55.0
+	golang.org/x/oauth2 v0.38.0
 	jaytaylor.com/html2text v0.0.0-20260303211410-1a4bdc82ecec
 )
 
@@ -15,6 +17,7 @@ require (
 	github.com/clipperhouse/displaywidth v0.10.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.6.0 // indirect
 	github.com/fatih/color v1.18.0 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.19 // indirect

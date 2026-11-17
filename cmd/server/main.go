@@ -43,6 +43,9 @@ func main() {
 	}
 
 	app := server.New(cfg, database)
+	bgCtx, stopBackground := context.WithCancel(context.Background())
+	defer stopBackground()
+	app.StartBackground(bgCtx)
 	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("starting server", "addr", cfg.ServerAddr)

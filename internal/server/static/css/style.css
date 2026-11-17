@@ -349,13 +349,20 @@ select {
 .message-list-item:focus-visible,
 .message-search-clear:focus-visible,
 .form-input:focus-visible,
-.message-search-input:focus-visible {
+.message-search-input:focus-visible,
+.grant-chip-remove:focus-visible,
+.login-emergency-summary:focus-visible,
+.admin-toggle input:focus-visible {
   outline: 3px solid var(--md-sys-color-primary);
   outline-offset: 2px;
 }
 
 .message-search-clear:disabled,
-.message-pagination-button:disabled {
+.message-pagination-button:disabled,
+.primary-button:disabled,
+.secondary-button:disabled,
+.tertiary-button:disabled,
+.grant-chip-remove:disabled {
   opacity: 0.52;
   cursor: not-allowed;
   box-shadow: none;
@@ -872,4 +879,528 @@ select {
   .message-pre {
     padding: var(--space-4);
   }
+}
+
+/* --- Accounts, sign-in methods and access management --- */
+
+.account-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.account-bar:empty {
+  display: none;
+}
+
+.account-identity,
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.account-email {
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  overflow-wrap: anywhere;
+}
+
+.account-admin-chip {
+  background: var(--md-sys-color-tertiary-container);
+  color: var(--md-sys-color-on-tertiary-container);
+}
+
+.login-methods {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.login-provider-button {
+  display: inline-flex;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.login-access-note {
+  margin: 0;
+}
+
+.login-emergency {
+  margin-top: var(--space-5);
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+  padding-top: var(--space-4);
+}
+
+.login-emergency-summary {
+  cursor: pointer;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--type-body-medium);
+}
+
+.login-emergency[open] .login-form {
+  margin-top: var(--space-3);
+}
+
+.form-notice {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--md-shape-corner-md);
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  font-size: var(--type-body-medium);
+}
+
+.mailbox-picker {
+  display: grid;
+  gap: var(--space-1);
+  min-width: min(18rem, 100%);
+}
+
+.mailbox-picker-scope {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.admin-add-user,
+.grant-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.admin-add-user .form-input,
+.grant-form .form-input {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.admin-user-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.admin-user {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-shape-corner-md);
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.admin-user-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.admin-user-identity {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.admin-user-email {
+  overflow-wrap: anywhere;
+}
+
+.admin-user-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.admin-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.admin-toggle input:disabled + span {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.admin-delete {
+  color: var(--md-sys-color-error);
+}
+
+.grant-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.grant-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.3rem 0.35rem 0.3rem 0.75rem;
+  border-radius: var(--md-shape-corner-full);
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  font-size: 0.82rem;
+  font-weight: 600;
+  max-width: 100%;
+}
+
+.grant-chip[data-kind='domain'] {
+  background: var(--md-sys-color-tertiary-container);
+  color: var(--md-sys-color-on-tertiary-container);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--md-sys-color-tertiary) 45%, transparent);
+}
+
+.grant-chip-kind {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.grant-chip-label {
+  overflow-wrap: anywhere;
+}
+
+.grant-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--md-shape-corner-full);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.grant-chip-remove:hover,
+.grant-chip-remove:focus-visible {
+  background: var(--md-sys-state-hover);
+}
+
+.admin-env-note {
+  margin: 0;
+}
+
+.grant-chip-remove:hover:disabled {
+  background: transparent;
+}
+
+@media (pointer: coarse) {
+  .grant-chip-remove {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+}
+
+.inline-error {
+  margin: 0;
+  flex-basis: 100%;
+  color: var(--md-sys-color-error);
+  font-size: var(--type-body-medium);
+}
+
+.admin-intro {
+  margin: 0;
+}
+
+.admin-intro code {
+  font-size: 0.9em;
+}
+
+.admin-section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.mailbox-picker-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.mailbox-picker-row .form-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--type-body-medium);
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+}
+
+@media (max-width: 48rem) {
+  .account-actions .tertiary-button,
+  .admin-user-controls .tertiary-button,
+  .mailbox-picker-row .tertiary-button {
+    width: auto;
+  }
+}
+
+/* --- Admin tabs and audit log --- */
+
+.admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.admin-tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.5rem;
+  padding: 0 var(--space-4);
+  border-radius: var(--md-shape-corner-full);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  color: var(--md-sys-color-on-surface-variant);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.admin-tab[aria-current='page'] {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  border-color: var(--md-sys-color-primary);
+}
+
+.admin-tab:hover {
+  background: var(--md-sys-state-hover);
+}
+
+.admin-tab:focus-visible,
+.audit-link:focus-visible {
+  outline: 3px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+
+.audit-panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.audit-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.audit-field {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.audit-filter-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.audit-summary {
+  margin: 0;
+}
+
+.audit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.audit-row {
+  display: grid;
+  grid-template-columns: 10.5rem minmax(10rem, 14rem) minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-shape-corner-md);
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.audit-row[data-event='access_denied'],
+.audit-row[data-event='sign_in_failed'] {
+  border-color: color-mix(in srgb, var(--md-sys-color-error) 45%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-error-container) 35%, var(--md-sys-color-surface-container-low));
+}
+
+.audit-time {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--type-body-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.audit-who,
+.audit-what,
+.audit-meta {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  justify-items: start;
+}
+
+.audit-target {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.audit-detail,
+.audit-who .audit-link,
+.audit-mailbox {
+  overflow-wrap: anywhere;
+}
+
+.audit-meta {
+  justify-items: end;
+  text-align: right;
+  font-size: var(--type-body-medium);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.audit-ip {
+  font-variant-numeric: tabular-nums;
+}
+
+.audit-link {
+  border: 0;
+  padding: 0.2rem 0;
+  min-height: 1.75rem;
+  background: none;
+  color: var(--md-sys-color-primary);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.audit-more {
+  justify-self: center;
+}
+
+@media (max-width: 64rem) {
+  .audit-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .audit-what,
+  .audit-meta {
+    grid-column: 1 / -1;
+  }
+
+  .audit-meta {
+    justify-items: start;
+    text-align: left;
+  }
+}
+
+@media (max-width: 48rem) {
+  .audit-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+
+  .audit-who,
+  .audit-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-3);
+  }
+
+  .audit-link {
+    min-height: 2.25rem;
+  }
+
+  .audit-filter-actions .tertiary-button {
+    width: auto;
+  }
+}
+
+.audit-filter-box {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.audit-filter-summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.audit-filter-summary:focus-visible,
+.audit-row:focus-visible {
+  outline: 3px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+
+.audit-filters input[type='date']:invalid,
+.audit-filters input[type='date']:not(:focus):placeholder-shown {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.audit-actor {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.audit-provider {
+  font-size: 0.8rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.audit-row[data-event^='admin_'] {
+  box-shadow: inset 4px 0 0 var(--md-sys-color-tertiary);
+}
+
+.audit-flag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  margin-right: var(--space-2);
+  border-radius: var(--md-shape-corner-full);
+  background: var(--md-sys-color-error);
+  color: var(--md-sys-color-on-error);
+  font-size: 0.8rem;
+}
+
+.audit-message-link {
+  text-decoration-style: dotted;
+}
+
+.audit-time {
+  font-size: 0.85rem;
 }

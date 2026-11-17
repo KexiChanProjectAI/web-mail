@@ -12,8 +12,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"lite-mail/internal/audit"
 	"lite-mail/internal/auth"
 	"lite-mail/internal/config"
+	"lite-mail/internal/emailaddr"
 	"lite-mail/internal/storage"
 )
 
@@ -21,7 +23,11 @@ type MessageHandler struct {
 	db      *sql.DB
 	storage *storage.Storage
 	config  *config.Config
+	audit   *audit.Logger
 }
+
+// SetAudit wires the audit log; nil disables it.
+func (h *MessageHandler) SetAudit(l *audit.Logger) { h.audit = l }
 
 func NewMessageHandler(db *sql.DB, storage *storage.Storage, cfg *config.Config) *MessageHandler {
 	return &MessageHandler{db: db, storage: storage, config: cfg}
@@ -40,16 +46,16 @@ type attachmentDTO struct {
 }
 
 type messageDTO struct {
-	ID          int64            `json:"id"`
-	Sender      string           `json:"sender"`
-	Subject     string           `json:"subject"`
-	MessageDate time.Time        `json:"message_date"`
-	ReceivedAt  time.Time        `json:"received_at"`
-	TextBody    string           `json:"text_body,omitempty"`
-	HTMLBody    string           `json:"html_body,omitempty"`
+	ID           int64           `json:"id"`
+	Sender       string          `json:"sender"`
+	Subject      string          `json:"subject"`
+	MessageDate  time.Time       `json:"message_date"`
+	ReceivedAt   time.Time       `json:"received_at"`
+	TextBody     string          `json:"text_body,omitempty"`
+	HTMLBody     string          `json:"html_body,omitempty"`
 	ParserStatus string          `json:"parser_status"`
-	Recipients  []recipientDTO   `json:"recipients,omitempty"`
-	Attachments []attachmentDTO  `json:"attachments,omitempty"`
+	Recipients   []recipientDTO  `json:"recipients,omitempty"`
+	Attachments  []attachmentDTO `json:"attachments,omitempty"`
 }
 
 func (h *MessageHandler) GetRawMIME(w http.ResponseWriter, r *http.Request) {
@@ -67,6 +73,7 @@ func (h *MessageHandler) GetRawMIME(w http.ResponseWriter, r *http.Request) {
 	rawQuery, rawArgs := rawMessageAuthQuery(session, messageID)
 	err := h.db.QueryRow(rawQuery, rawArgs...).Scan(&contentHash)
 	if errors.Is(err, sql.ErrNoRows) {
+		recordDenied(h.audit, h.db, r, session, messageID, "raw download")
 		http.NotFound(w, r)
 		return
 	}
@@ -80,6 +87,7 @@ func (h *MessageHandler) GetRawMIME(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	recordAccess(h.audit, h.db, r, session, audit.RawDownload, messageID)
 	w.Header().Set("Content-Type", "message/rfc822")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"message-%d.eml\"", messageID))
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
@@ -98,6 +106,7 @@ func (h *MessageHandler) GetMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	msg, err := h.getMessage(messageID, session)
 	if errors.Is(err, sql.ErrNoRows) {
+		recordDenied(h.audit, h.db, r, session, messageID, "message")
 		http.NotFound(w, r)
 		return
 	}
@@ -105,6 +114,7 @@ func (h *MessageHandler) GetMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+	recordAccess(h.audit, h.db, r, session, audit.MessageView, messageID)
 	writeJSON(w, http.StatusOK, msg)
 }
 
@@ -121,8 +131,18 @@ func (h *MessageHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * perPage
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	mailbox := emailaddr.Canonical(r.URL.Query().Get("mailbox"))
+	if mailbox != "" && !session.HasMailboxAccess(mailbox) {
+		h.audit.Record(r, session, audit.AccessDenied, audit.WithMailbox(mailbox), audit.WithDetail("inbox listing outside granted mailboxes"))
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "mailbox not granted"})
+		return
+	}
+	if !session.HasAnyMailbox() {
+		writeJSON(w, http.StatusOK, map[string]any{"messages": []messageDTO{}, "total": 0, "page": page, "per_page": perPage, "mailbox": mailbox})
+		return
+	}
 
-	where, args := listWhere(session, q)
+	where, args := listWhere(session, mailbox, q)
 	var total int
 	if err := h.db.QueryRow("SELECT COUNT(DISTINCT m.id) FROM messages m "+where, args...).Scan(&total); err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -151,7 +171,8 @@ FROM messages m `+where+` ORDER BY m.received_at DESC LIMIT ? OFFSET ?`, args...
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": messages, "total": total, "page": page, "per_page": perPage})
+	h.audit.RecordList(r, session, mailbox, listScope(session, q))
+	writeJSON(w, http.StatusOK, map[string]any{"messages": messages, "total": total, "page": page, "per_page": perPage, "mailbox": mailbox})
 }
 
 func (h *MessageHandler) getMessage(messageID int64, session *auth.Session) (*messageDTO, error) {
@@ -209,34 +230,24 @@ func (h *MessageHandler) attachments(messageID int64) ([]attachmentDTO, error) {
 }
 
 func rawMessageAuthQuery(session *auth.Session, messageID int64) (string, []any) {
-	if session.IsAdmin {
-		return "SELECT content_hash FROM messages WHERE id = ?", []any{messageID}
-	}
-	return "SELECT m.content_hash FROM messages m WHERE m.id = ? AND EXISTS (SELECT 1 FROM message_recipients mr WHERE mr.message_id = m.id AND mr.recipient_email = ?)", []any{messageID, session.Email}
+	scope, scopeArgs := scopeClause(session, "")
+	return "SELECT m.content_hash FROM messages m" + whereClause("m.id = ?", scope), append([]any{messageID}, scopeArgs...)
 }
 
 func messageAuthQuery(session *auth.Session, messageID int64) (string, []any) {
-	if session.IsAdmin {
-		return "SELECT id, sender, COALESCE(subject,''), message_date, received_at, COALESCE(text_body,''), COALESCE(html_body,''), parser_status FROM messages WHERE id = ?", []any{messageID}
-	}
-	return "SELECT m.id, m.sender, COALESCE(m.subject,''), m.message_date, m.received_at, COALESCE(m.text_body,''), COALESCE(m.html_body,''), m.parser_status FROM messages m WHERE m.id = ? AND EXISTS (SELECT 1 FROM message_recipients mr WHERE mr.message_id = m.id AND mr.recipient_email = ?)", []any{messageID, session.Email}
+	scope, scopeArgs := scopeClause(session, "")
+	return "SELECT m.id, m.sender, COALESCE(m.subject,''), m.message_date, m.received_at, COALESCE(m.text_body,''), COALESCE(m.html_body,''), m.parser_status FROM messages m" +
+		whereClause("m.id = ?", scope), append([]any{messageID}, scopeArgs...)
 }
 
-func listWhere(session *auth.Session, q string) (string, []any) {
-	clauses := []string{}
-	args := []any{}
-	if !session.IsAdmin {
-		clauses = append(clauses, "EXISTS (SELECT 1 FROM message_recipients mr WHERE mr.message_id = m.id AND mr.recipient_email = ?)")
-		args = append(args, session.Email)
-	}
+func listWhere(session *auth.Session, mailbox, q string) (string, []any) {
+	scope, args := scopeClause(session, mailbox)
+	search := ""
 	if isSearchQueryUsable(q) {
-		clauses = append(clauses, "MATCH(m.sender, m.subject, m.text_body) AGAINST (? IN BOOLEAN MODE)")
+		search = "MATCH(m.sender, m.subject, m.text_body) AGAINST (? IN BOOLEAN MODE)"
 		args = append(args, q)
 	}
-	if len(clauses) == 0 {
-		return "", args
-	}
-	return "WHERE " + strings.Join(clauses, " AND "), args
+	return whereClause(scope, search), args
 }
 
 func isSearchQueryUsable(q string) bool {

@@ -15,18 +15,22 @@ import (
 	"testing"
 	"time"
 
+	"lite-mail/internal/auth"
 	"lite-mail/internal/config"
 	maildb "lite-mail/internal/db"
 	"lite-mail/internal/ingest"
 	"lite-mail/internal/server"
 	"lite-mail/internal/storage"
+	"lite-mail/internal/testutil/jwttest"
 )
 
 const (
 	AdminPSK        = "test-admin-psk"
-	NormalUserPSK   = "test-normal-psk"
 	WorkerIngestPSK = "test-ingest-psk"
 	TestUserEmail   = "test@example.com"
+	EnvAdminEmail   = "boss@example.com"
+	AccessIssuer    = "https://test-team.cloudflareaccess.com"
+	AccessAUD       = "test-access-aud"
 )
 
 type IntegrationTestSuite struct {
@@ -35,6 +39,7 @@ type IntegrationTestSuite struct {
 	server  *httptest.Server
 	config  *config.Config
 	tmpDir  string
+	jwks    *jwttest.FakeJWKS
 }
 
 func SetupSuite(t *testing.T) *IntegrationTestSuite {
@@ -62,27 +67,30 @@ func SetupSuite(t *testing.T) *IntegrationTestSuite {
 	cleanDatabase(t, database)
 
 	cfg := &config.Config{
-		DatabaseURL:       dsn,
-		DataDir:           tmpDir,
-		PublicBaseURL:     "http://127.0.0.1",
-		MaxMessageBytes:   1024 * 1024,
-		SessionCookieName: "lite_mail_test_session",
-		SessionTTLHours:   24,
-		NormalUserPSK:     NormalUserPSK,
-		AdminPSK:          AdminPSK,
-		WorkerIngestPSK:   WorkerIngestPSK,
-		AppEnv:            "test",
+		DatabaseURL:        dsn,
+		DataDir:            tmpDir,
+		PublicBaseURL:      "http://127.0.0.1",
+		MaxMessageBytes:    1024 * 1024,
+		SessionCookieName:  "lite_mail_test_session",
+		SessionTTLHours:    24,
+		AdminPSK:           AdminPSK,
+		WorkerIngestPSK:    WorkerIngestPSK,
+		AppEnv:             "test",
+		CFAccessTeamDomain: "test-team",
+		CFAccessAUD:        AccessAUD,
+		AdminEmails:        []string{EnvAdminEmail},
 	}
+	jwks := jwttest.NewFakeJWKS(t)
 	store, err := storage.NewStorage(cfg.DataDir)
 	if err != nil {
 		database.Close()
 		t.Fatalf("create storage: %v", err)
 	}
-	srv := server.New(cfg, database)
+	srv := server.New(cfg, database, server.WithAccessVerifier(auth.NewAccessVerifierWithJWKS(AccessIssuer, jwks.JWKSURL(), AccessAUD, nil)))
 	httpServer := httptest.NewServer(srv.Handler())
 	cfg.PublicBaseURL = httpServer.URL
 
-	return &IntegrationTestSuite{db: database, storage: store, server: httpServer, config: cfg, tmpDir: tmpDir}
+	return &IntegrationTestSuite{db: database, storage: store, server: httpServer, config: cfg, tmpDir: tmpDir, jwks: jwks}
 }
 
 func TeardownSuite(suite *IntegrationTestSuite) {
@@ -156,23 +164,75 @@ func ingestRaw(t *testing.T, suite *IntegrationTestSuite, raw []byte) int64 {
 	return decoded.MessageID
 }
 
-func login(t *testing.T, suite *IntegrationTestSuite, psk, email string) []*http.Cookie {
+// login performs the emergency ADMIN_PSK login and returns the session cookies.
+func login(t *testing.T, suite *IntegrationTestSuite, psk string) []*http.Cookie {
 	t.Helper()
-	body := map[string]string{"psk": psk}
-	if email != "" {
-		body["email"] = email
-	}
-	payload, _ := json.Marshal(body)
-	resp, err := suite.server.Client().Post(suite.server.URL+"/api/login", "application/json", bytes.NewReader(payload))
-	if err != nil {
-		t.Fatalf("login: %v", err)
-	}
+	payload, _ := json.Marshal(map[string]string{"psk": psk})
+	resp := doRequest(t, suite, http.MethodPost, "/api/login", nil, payload)
 	defer resp.Body.Close()
 	respBody := readBody(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("login status = %d, body = %s", resp.StatusCode, respBody)
 	}
 	return resp.Cookies()
+}
+
+// seedUser inserts a users row with the given admin flag and grant patterns.
+func seedUser(t *testing.T, suite *IntegrationTestSuite, email string, isAdmin bool, patterns ...string) int64 {
+	t.Helper()
+	res, err := suite.db.Exec("INSERT INTO users (email, is_admin) VALUES (?, ?)", email, isAdmin)
+	if err != nil {
+		t.Fatalf("seed user %s: %v", email, err)
+	}
+	id, _ := res.LastInsertId()
+	for _, pattern := range patterns {
+		if _, err := suite.db.Exec("INSERT INTO mailbox_grants (user_id, pattern) VALUES (?, ?)", id, pattern); err != nil {
+			t.Fatalf("seed grant %s: %v", pattern, err)
+		}
+	}
+	return id
+}
+
+// accessCookies returns a Cloudflare Access CF_Authorization cookie for email,
+// signed by the suite's fake team key. It does not touch the database.
+func accessCookies(t *testing.T, suite *IntegrationTestSuite, email string) []*http.Cookie {
+	t.Helper()
+	token := suite.jwks.Mint(t, jwttest.AccessClaims(AccessIssuer, AccessAUD, email))
+	return []*http.Cookie{{Name: auth.CFAccessCookie, Value: token}}
+}
+
+// asUser seeds a non-admin user with grants and returns Access credentials for it.
+func asUser(t *testing.T, suite *IntegrationTestSuite, email string, patterns ...string) []*http.Cookie {
+	t.Helper()
+	seedUser(t, suite, email, false, patterns...)
+	return accessCookies(t, suite, email)
+}
+
+// doRequest sends a same-origin request (as the SPA would) with cookies and an optional JSON body.
+func doRequest(t *testing.T, suite *IntegrationTestSuite, method, path string, cookies []*http.Cookie, body []byte) *http.Response {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, suite.server.URL+path, reader)
+	if err != nil {
+		t.Fatalf("create %s %s: %v", method, path, err)
+	}
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	client := suite.server.Client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	return resp
 }
 
 func getWithCookies(t *testing.T, suite *IntegrationTestSuite, path string, cookies []*http.Cookie) *http.Response {
@@ -193,18 +253,7 @@ func getWithCookies(t *testing.T, suite *IntegrationTestSuite, path string, cook
 
 func postWithCookies(t *testing.T, suite *IntegrationTestSuite, path string, cookies []*http.Cookie) *http.Response {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodPost, suite.server.URL+path, nil)
-	if err != nil {
-		t.Fatalf("create POST %s: %v", path, err)
-	}
-	for _, cookie := range cookies {
-		req.AddCookie(cookie)
-	}
-	resp, err := suite.server.Client().Do(req)
-	if err != nil {
-		t.Fatalf("POST %s: %v", path, err)
-	}
-	return resp
+	return doRequest(t, suite, http.MethodPost, path, cookies, nil)
 }
 
 type listResponse struct {
@@ -320,6 +369,9 @@ func uniqueMessage(t *testing.T, fixture, subject, recipient string) []byte {
 func cleanDatabase(t *testing.T, database *sql.DB) {
 	t.Helper()
 	for _, query := range []string{
+		"DELETE FROM audit_events",
+		"DELETE FROM mailbox_grants",
+		"DELETE FROM users",
 		"DELETE FROM ingest_events",
 		"DELETE FROM attachments",
 		"DELETE FROM message_recipients",

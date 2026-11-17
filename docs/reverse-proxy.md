@@ -96,9 +96,15 @@ The Go service sets its own security headers:
 - `Content-Security-Policy`
 - `X-Frame-Options: DENY`
 - `X-Content-Type-Options: nosniff`
-- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Referrer-Policy: no-referrer`
 
 Your reverse proxy can add additional headers if needed, but this is optional.
+
+### Cloudflare Access
+
+When the hostname is behind Cloudflare Access, pass the `Cf-Access-Jwt-Assertion` header and the `CF_Authorization` cookie through unchanged; Caddy and nginx do so by default.
+Accept origin traffic only from Cloudflare (a Tunnel, or a firewall limited to Cloudflare IP ranges) so nobody reaches lite-mail around the Access policy.
+See [authentication.md](authentication.md), including the Bypass rule `/api/ingest` needs.
 
 ### TLS Recommendations
 
