@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -12,7 +13,9 @@ import (
 
 	"lite-mail/internal/config"
 	"lite-mail/internal/db"
+	"lite-mail/internal/ingest"
 	"lite-mail/internal/server"
+	"lite-mail/internal/storage"
 )
 
 func main() {
@@ -40,6 +43,10 @@ func main() {
 	if err := db.RunMigrations(database, migrations); err != nil {
 		logger.Error("failed to run migrations", "error", err)
 		os.Exit(1)
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "backfill-envelope" {
+		os.Exit(runBackfillEnvelope(cfg, database, os.Args[2:]))
 	}
 
 	app := server.New(cfg, database)
@@ -81,4 +88,39 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("server stopped")
+}
+
+// runBackfillEnvelope records the envelope recipient of messages stored before
+// it was tracked: lite-mail backfill-envelope [--dry-run]
+func runBackfillEnvelope(cfg *config.Config, database *sql.DB, args []string) int {
+	dryRun := false
+	for _, arg := range args {
+		switch arg {
+		case "--dry-run", "-dry-run", "-n":
+			dryRun = true
+		default:
+			slog.Error("usage: lite-mail backfill-envelope [--dry-run]", "unknown_arg", arg)
+			return 2
+		}
+	}
+	store, err := storage.NewStorage(cfg.DataDir)
+	if err != nil {
+		slog.Error("open storage", "error", err)
+		return 1
+	}
+	res, err := ingest.BackfillEnvelopeRecipients(context.Background(), database, store, dryRun)
+	if res != nil {
+		slog.Info("envelope backfill",
+			"dry_run", dryRun,
+			"scanned", res.Scanned,
+			"added", res.Added,
+			"no_envelope_ids", res.NoEnvelope,
+			"read_error_ids", res.ReadErrors,
+		)
+	}
+	if err != nil {
+		slog.Error("envelope backfill failed", "error", err)
+		return 1
+	}
+	return 0
 }

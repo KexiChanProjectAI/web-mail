@@ -122,7 +122,9 @@ wrangler secret list
 - **Headers**:
   - `Content-Type: message/rfc822` - Raw MIME format
   - `X-Lite-Mail-Ingest-PSK: <WORKER_INGEST_PSK>` - Authentication
-  - *(`X-Lite-Mail-From` and `X-Lite-Mail-To` are reserved for future use; not currently sent)*
+  - `X-Lite-Mail-To: <message.to>` - Envelope recipient (SMTP RCPT TO), the mailbox the message belongs to.
+    Without it, the service reads the recipient from the topmost `Received` header that Cloudflare Email Routing adds (`by cloudflare-email.net` or `.org`, `for <address>`).
+  - *(`X-Lite-Mail-From` is reserved for future use; not currently sent)*
 - **Body**: Raw MIME email as `ArrayBuffer`
 
 ### Response

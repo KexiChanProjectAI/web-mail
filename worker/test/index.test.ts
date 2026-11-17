@@ -124,6 +124,7 @@ describe("Email Worker", () => {
 			expect(options.headers).toEqual({
 				"Content-Type": "message/rfc822",
 				"X-Lite-Mail-Ingest-PSK": "super-secret-psk",
+				"X-Lite-Mail-To": "catchall@lite-mail.example.com",
 			});
 
 			expect(options.body).toBeInstanceOf(ArrayBuffer);

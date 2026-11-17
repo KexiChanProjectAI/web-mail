@@ -68,7 +68,14 @@ A grant lets one user read mail delivered to:
 - one address, written `alice@example.com`, or
 - every address of a domain, written `*@example.com` (subdomains are not included).
 
-A message is visible when any of its To, Cc or Bcc recipients matches a grant.
+A message is visible when its envelope recipient matches a grant.
+The envelope recipient is the address Cloudflare Email Routing delivered the message to, not the To header.
+They differ for forwarded mail: a Microsoft 365 tenant that forwards `yzs@tenant.onmicrosoft.com` to `catch-all@example.com` keeps `To: yzs@tenant.onmicrosoft.com`, and the message belongs to `catch-all@example.com`.
+The message page shows it as **Delivered to**; To, Cc and Bcc are shown but grant nothing.
+A message stored without an envelope recipient falls back to its To, Cc and Bcc addresses.
+
+Mail stored before envelope recipients were recorded is fixed once with `lite-mail backfill-envelope` (add `--dry-run` to only report).
+It reads the address from the Cloudflare `Received` header of each stored raw message, runs with the same environment as the service, and can be repeated safely.
 Grants and admin changes take effect on the user's next request; nobody has to sign in again.
 
 People appear on the **Manage access** page after their first sign-in, with no access.

@@ -85,6 +85,13 @@ func (h *IngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	contentHash := HashBytes(raw)
+	envelopeTo := envelopeRecipient(r, raw)
+	if envelopeTo == "" {
+		slog.Warn("ingest without envelope recipient; mailbox falls back to To/Cc/Bcc headers",
+			"request_id", requestID,
+			"content_hash", contentHash,
+		)
+	}
 	duplicate, err := h.isDuplicate(r.Context(), contentHash)
 	if err != nil {
 		slog.Error("ingest duplicate check failed",
@@ -96,6 +103,15 @@ func (h *IngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if duplicate {
+		if err := h.addEnvelopeRecipient(r.Context(), contentHash, envelopeTo); err != nil {
+			slog.Error("ingest duplicate: add envelope recipient failed",
+				"request_id", requestID,
+				"content_hash", contentHash,
+				"err", err,
+			)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "persist message"})
+			return
+		}
 		slog.Info("ingest duplicate",
 			"request_id", requestID,
 			"ip", clientIP,
@@ -129,7 +145,7 @@ func (h *IngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	messageID, err := h.persist(r.Context(), parsed, parserStatus, parserError)
+	messageID, err := h.persist(r.Context(), parsed, envelopeTo, parserStatus, parserError)
 	if err != nil {
 		slog.Error("ingest persist failed",
 			"request_id", requestID,
@@ -162,7 +178,22 @@ func (h *IngestHandler) isDuplicate(ctx context.Context, contentHash string) (bo
 	return false, err
 }
 
-func (h *IngestHandler) persist(ctx context.Context, parsed *ParsedMessage, parserStatus string, parserError sql.NullString) (int64, error) {
+// addEnvelopeRecipient records envelopeTo on the already stored message with
+// contentHash, so a byte-identical copy delivered to a second address is
+// visible in that mailbox too. It is a no-op when the row already exists.
+func (h *IngestHandler) addEnvelopeRecipient(ctx context.Context, contentHash, envelopeTo string) error {
+	if envelopeTo == "" {
+		return nil
+	}
+	_, err := h.db.ExecContext(ctx, `INSERT INTO message_recipients (message_id, recipient_email, recipient_type, received_at)
+SELECT m.id, ?, ?, m.received_at FROM messages m
+WHERE m.content_hash = ?
+AND NOT EXISTS (SELECT 1 FROM message_recipients r WHERE r.message_id = m.id AND r.recipient_type = ? AND r.recipient_email = ?)`,
+		envelopeTo, RecipientTypeEnvelope, contentHash, RecipientTypeEnvelope, envelopeTo)
+	return err
+}
+
+func (h *IngestHandler) persist(ctx context.Context, parsed *ParsedMessage, envelopeTo, parserStatus string, parserError sql.NullString) (int64, error) {
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -183,7 +214,11 @@ func (h *IngestHandler) persist(ctx context.Context, parsed *ParsedMessage, pars
 		return 0, err
 	}
 
-	for _, recipient := range parsed.Recipients {
+	recipients := parsed.Recipients
+	if envelopeTo != "" {
+		recipients = append([]Recipient{{Email: envelopeTo, Type: RecipientTypeEnvelope}}, recipients...)
+	}
+	for _, recipient := range recipients {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO message_recipients (message_id, recipient_email, recipient_type, received_at) VALUES (?, ?, ?, ?)`, messageID, recipient.Email, recipient.Type, time.Now().UTC()); err != nil {
 			return 0, err
 		}

@@ -424,7 +424,7 @@ function groupRecipients(recipients = []) {
       groups[type].push(recipient.email || 'Unknown');
       return groups;
     },
-    { to: [], cc: [], bcc: [] },
+    { to: [], cc: [], bcc: [], envelope: [] },
   );
 }
 
@@ -694,6 +694,9 @@ async function renderMessageView(message) {
   fields.appendChild(buildHeaderField('From', createFieldValue(message.sender || 'Unknown sender')));
 
   const recipientGroups = groupRecipients(recipients);
+  if (recipientGroups.envelope.length > 0) {
+    fields.appendChild(buildHeaderField('Delivered to', createFieldValue(recipientGroups.envelope.join(', '))));
+  }
   fields.appendChild(buildHeaderField('To', createFieldValue(recipientGroups.to.join(', ') || 'No visible recipients')));
   if (recipientGroups.cc.length > 0) {
     fields.appendChild(buildHeaderField('Cc', createFieldValue(recipientGroups.cc.join(', '))));

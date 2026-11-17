@@ -213,17 +213,27 @@ func (s *UserStore) DeleteGrant(ctx context.Context, userID, grantID int64) erro
 	return nil
 }
 
+// MailboxRecipientCondition is an SQL condition over message_recipients alias
+// rAlias that keeps the rows deciding which mailbox a message belongs to: its
+// envelope recipients, or its To/Cc/Bcc rows when no envelope recipient was
+// recorded (mail ingested before envelope tracking that could not be backfilled).
+// messageIDExpr is the SQL expression for the message id in the outer query.
+func MailboxRecipientCondition(rAlias, messageIDExpr string) string {
+	return "(" + rAlias + ".recipient_type = 'envelope' OR NOT EXISTS (SELECT 1 FROM message_recipients env WHERE env.message_id = " +
+		messageIDExpr + " AND env.recipient_type = 'envelope'))"
+}
+
 // KnownMailboxes lists recipient addresses and domains seen in stored mail,
 // optionally filtered by a substring, for the admin grant editor.
 func (s *UserStore) KnownMailboxes(ctx context.Context, q string, limit int) (addresses, domains []string, err error) {
 	like := "%" + EscapeLike(strings.ToLower(strings.TrimSpace(q))) + "%"
-	addresses, err = s.stringColumn(ctx, `SELECT DISTINCT recipient_email FROM message_recipients
-WHERE recipient_email LIKE ? ORDER BY recipient_email LIMIT ?`, like, limit)
+	addresses, err = s.stringColumn(ctx, `SELECT DISTINCT mr.recipient_email FROM message_recipients mr
+WHERE `+MailboxRecipientCondition("mr", "mr.message_id")+` AND mr.recipient_email LIKE ? ORDER BY mr.recipient_email LIMIT ?`, like, limit)
 	if err != nil {
 		return nil, nil, err
 	}
-	domains, err = s.stringColumn(ctx, `SELECT DISTINCT SUBSTRING_INDEX(recipient_email, '@', -1) AS d FROM message_recipients
-WHERE recipient_email LIKE ? ORDER BY d LIMIT ?`, like, limit)
+	domains, err = s.stringColumn(ctx, `SELECT DISTINCT SUBSTRING_INDEX(mr.recipient_email, '@', -1) AS d FROM message_recipients mr
+WHERE `+MailboxRecipientCondition("mr", "mr.message_id")+` AND mr.recipient_email LIKE ? ORDER BY d LIMIT ?`, like, limit)
 	return addresses, domains, err
 }
 
