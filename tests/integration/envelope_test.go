@@ -181,3 +181,19 @@ func TestEnvelope_Backfill(t *testing.T) {
 		t.Fatalf("second backfill = %+v, %v", again, err)
 	}
 }
+
+func TestEnvelope_AuditRecordsEnvelopeMailbox(t *testing.T) {
+	suite := SetupSuite(t)
+	defer TeardownSuite(suite)
+
+	_, id := postIngestEnvelope(t, suite, forwardedMessage("yzs@tenant.example", "catch-all@mine.example"), "catch-all@mine.example")
+	// Granted both the envelope domain and the header domain: the access still
+	// goes through the envelope mailbox only.
+	reader := asUser(t, suite, "both@corp.example", "*@mine.example", "*@tenant.example")
+	assertStatus(t, getWithCookies(t, suite, fmt.Sprintf("/api/messages/%d", id), reader), http.StatusOK)
+
+	rows := auditRows(t, suite, "event = 'message_view' AND message_id = ?", id)
+	if len(rows) != 1 || rows[0].Mailbox != "catch-all@mine.example" {
+		t.Fatalf("message_view audit rows = %+v", rows)
+	}
+}
